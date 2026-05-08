@@ -1,4 +1,4 @@
-const CACHE_NAME = "gameping-web-v5";
+const CACHE_NAME = "gameping-web-v6";
 const APP_SHELL = [
   "/",
   "/styles.css",
@@ -33,7 +33,7 @@ self.addEventListener("push", event => {
     body: data.body || "게임 시작했어. 들어와!",
     icon: "/icon.svg",
     badge: "/icon.svg",
-    tag: data.pingID || "gameping-ping",
+    tag: data.pingID || data.requestID || "gameping-ping",
     data: {
       url: data.url || "/"
     },

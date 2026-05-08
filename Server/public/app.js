@@ -29,6 +29,8 @@ const els = {
   partyPanel: document.querySelector("#partyPanel"),
   partyButton: document.querySelector("#partyButton"),
   partyList: document.querySelector("#partyList"),
+  friendRequestPanel: document.querySelector("#friendRequestPanel"),
+  friendRequestList: document.querySelector("#friendRequestList"),
   friendList: document.querySelector("#friendList"),
   inboxList: document.querySelector("#inboxList"),
   recentList: document.querySelector("#recentList"),
@@ -54,6 +56,7 @@ function loadState() {
         userName
       },
       friends: Array.isArray(saved.friends) ? saved.friends : [],
+      friendRequests: [],
       recent: Array.isArray(saved.recent) ? saved.recent : [],
       inbox: Array.isArray(saved.inbox) ? saved.inbox : [],
       apiToken: saved.apiToken ?? "",
@@ -69,6 +72,7 @@ function loadState() {
       inviteCode: makeInviteCode()
     },
     friends: [],
+    friendRequests: [],
     recent: [],
     inbox: [],
     apiToken: "",
@@ -277,38 +281,162 @@ async function resolveFriend() {
   }
 
   try {
-    const payload = await api(`/invites/${encodeURIComponent(normalizeCode(code))}`);
-    const friend = {
-      id: payload.friend.userID,
-      name: payload.friend.userName,
-      handle: payload.friend.inviteCode,
-      color: COLORS[state.friends.length % COLORS.length]
-    };
-
-    if (friend.id === state.profile.userID) {
+    const targetInviteCode = normalizeCode(code);
+    if (targetInviteCode === state.profile.inviteCode) {
       toast("내 코드는 추가할 수 없어.");
       return;
     }
 
-    if (state.friends.some(item => item.id === friend.id || item.handle === friend.handle)) {
+    if (state.friends.some(item => item.handle === targetInviteCode)) {
       toast("이미 추가된 친구야.");
       return;
     }
 
-    state.friends.push(friend);
-    saveState();
-    render();
+    const payload = await api("/friend-requests", {
+      method: "POST",
+      body: JSON.stringify({
+        senderID: state.profile.userID,
+        senderName: state.profile.userName,
+        senderInviteCode: state.profile.inviteCode,
+        targetInviteCode
+      })
+    });
+
     els.friendCodeInput.value = "";
     els.friendDialog.close();
-    toast(`${friend.name} 추가됨`);
-  } catch {
-    toast("코드를 찾지 못했어.");
+
+    if ((payload.status === "friends" || payload.status === "accepted") && payload.friend) {
+      const friend = addOrUpdateFriend(payload.friend);
+      saveState();
+      render();
+      toast(friend ? `${friend.name} 추가됨` : "친구 추가됨");
+      return;
+    }
+
+    toast("친구 요청 보냄");
+  } catch (error) {
+    if (error.message === "Cannot add yourself") {
+      toast("내 코드는 추가할 수 없어.");
+      return;
+    }
+
+    if (error.message === "Invite code not found") {
+      toast("코드를 찾지 못했어.");
+      return;
+    }
+
+    toast("친구 요청 실패");
   }
 }
 
 function normalizeCode(code) {
   const compact = code.replaceAll(" ", "").toUpperCase();
   return compact.startsWith("GP-") ? compact : `GP-${compact}`;
+}
+
+function normalizeFriendPayload(payload) {
+  const id = String(payload.userID ?? payload.id ?? "").trim();
+  if (!id) return null;
+
+  const handle = String(payload.inviteCode ?? payload.handle ?? "").trim();
+  const existing = state.friends.find(friend =>
+    friend.id === id || (handle && friend.handle === handle)
+  );
+
+  return {
+    id,
+    name: String(payload.userName ?? payload.name ?? existing?.name ?? "친구"),
+    handle,
+    color: existing?.color ?? COLORS[state.friends.length % COLORS.length]
+  };
+}
+
+function addOrUpdateFriend(payload) {
+  const friend = normalizeFriendPayload(payload);
+  if (!friend || friend.id === state.profile.userID) return null;
+
+  const index = state.friends.findIndex(item =>
+    item.id === friend.id || (friend.handle && item.handle === friend.handle)
+  );
+
+  if (index >= 0) {
+    state.friends[index] = {
+      ...state.friends[index],
+      ...friend,
+      color: state.friends[index].color
+    };
+    return state.friends[index];
+  }
+
+  state.friends.push(friend);
+  return friend;
+}
+
+async function syncFriends() {
+  try {
+    const payload = await api(`/friends/${encodeURIComponent(state.profile.userID)}`);
+    const before = state.friends.map(friend => `${friend.id}:${friend.name}:${friend.handle}`).join("|");
+
+    for (const friend of payload.friends ?? []) {
+      addOrUpdateFriend(friend);
+    }
+
+    const after = state.friends.map(friend => `${friend.id}:${friend.name}:${friend.handle}`).join("|");
+    if (before !== after) {
+      saveState();
+      render();
+    }
+  } catch {
+    // The app can still call locally saved friends if sync temporarily fails.
+  }
+}
+
+async function pollFriendRequests({ notify = false } = {}) {
+  try {
+    const payload = await api(`/friend-requests/${encodeURIComponent(state.profile.userID)}`);
+    const previousIDs = new Set(state.friendRequests.map(request => request.id));
+    const incoming = payload.incoming ?? [];
+    const hasNewRequest = incoming.some(request => !previousIDs.has(request.id));
+
+    state.friendRequests = incoming;
+    saveState();
+    renderFriendRequests();
+
+    if (notify && hasNewRequest && incoming[0]) {
+      toast(`${incoming[0].senderName} 친구 요청`);
+    }
+  } catch {
+    // Friend requests are non-blocking; keep the current UI if polling fails.
+  }
+}
+
+async function respondFriendRequest(requestID, action) {
+  const request = state.friendRequests.find(item => item.id === requestID);
+
+  try {
+    const payload = await api(`/friend-requests/${encodeURIComponent(requestID)}/respond`, {
+      method: "POST",
+      body: JSON.stringify({
+        userID: state.profile.userID,
+        action
+      })
+    });
+
+    state.friendRequests = state.friendRequests.filter(item => item.id !== requestID);
+
+    if (action === "accept" && payload.friend) {
+      addOrUpdateFriend(payload.friend);
+      toast(`${payload.friend.name ?? payload.friend.userName ?? request?.senderName ?? "친구"} 수락됨`);
+    } else {
+      toast("친구 요청 거절됨");
+    }
+
+    saveState();
+    render();
+    await syncFriends();
+  } catch {
+    toast("요청 처리 실패");
+  }
 }
 
 async function pingFriend(friend, shouldToast = true) {
@@ -446,6 +574,7 @@ function render() {
   els.profileButton.setAttribute("aria-label", `${state.profile.userName} 정보`);
   syncPartyWithFriends();
   renderFriends();
+  renderFriendRequests();
   renderParty();
   renderInbox();
   renderRecent();
@@ -507,6 +636,29 @@ function renderFriends() {
       </article>
     `;
   }).join("");
+}
+
+function renderFriendRequests() {
+  if (state.friendRequests.length === 0) {
+    els.friendRequestPanel.classList.add("hidden");
+    els.friendRequestList.innerHTML = "";
+    return;
+  }
+
+  els.friendRequestPanel.classList.remove("hidden");
+  els.friendRequestList.innerHTML = state.friendRequests.map(request => `
+    <article class="request-row">
+      <div class="avatar request-avatar">${initials(request.senderName)}</div>
+      <div>
+        <div class="row-title">${escapeHTML(request.senderName)}</div>
+        <div class="row-subtitle">${escapeHTML(request.senderInviteCode)}</div>
+      </div>
+      <div class="request-actions">
+        <button class="accept-button" data-request-action="accept" data-request-id="${escapeHTML(request.id)}" type="button">수락</button>
+        <button class="reject-button" data-request-action="reject" data-request-id="${escapeHTML(request.id)}" type="button">거절</button>
+      </div>
+    </article>
+  `).join("");
 }
 
 function renderParty() {
@@ -597,6 +749,8 @@ async function saveProfile() {
   render();
   try {
     await registerDevice(await getExistingPushSubscription());
+    await syncFriends();
+    await pollFriendRequests({ notify: false });
     await pollInbox({ notify: false });
     updatePushUI();
     toast("저장 완료");
@@ -675,6 +829,12 @@ els.friendList.addEventListener("change", event => {
   renderFriends();
 });
 
+els.friendRequestList.addEventListener("click", event => {
+  const button = event.target.closest("[data-request-action]");
+  if (!button) return;
+  respondFriendRequest(button.dataset.requestId, button.dataset.requestAction);
+});
+
 render();
 updatePushUI();
 
@@ -692,6 +852,8 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
 
 checkHealth()
   .then(async () => registerDevice(await getExistingPushSubscription()))
+  .then(syncFriends)
+  .then(() => pollFriendRequests({ notify: false }))
   .then(() => pollInbox({ notify: false }))
   .then(updatePushUI)
   .catch(() => {
@@ -702,4 +864,6 @@ setInterval(() => {
   renderFriends();
 }, 1000);
 setInterval(checkHealth, 10_000);
+setInterval(syncFriends, 10_000);
+setInterval(() => pollFriendRequests({ notify: true }), 4_000);
 setInterval(() => pollInbox({ notify: true }), 3_000);

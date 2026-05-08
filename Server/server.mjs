@@ -19,6 +19,8 @@ const dataPath = join(dataDir, "store.json");
 const store = loadStore();
 const devices = new Map(store.devices.map(device => [device.userID, device]));
 const pings = store.pings;
+const friendRequests = store.friendRequests;
+const friendships = store.friendships;
 const rateBuckets = new Map();
 
 function normalizeInviteCode(code) {
@@ -39,12 +41,16 @@ function loadStore() {
     const parsed = JSON.parse(readFileSync(dataPath, "utf8"));
     return {
       devices: Array.isArray(parsed.devices) ? parsed.devices : [],
-      pings: Array.isArray(parsed.pings) ? parsed.pings : []
+      pings: Array.isArray(parsed.pings) ? parsed.pings : [],
+      friendRequests: Array.isArray(parsed.friendRequests) ? parsed.friendRequests : [],
+      friendships: Array.isArray(parsed.friendships) ? parsed.friendships : []
     };
   } catch {
     return {
       devices: [],
-      pings: []
+      pings: [],
+      friendRequests: [],
+      friendships: []
     };
   }
 }
@@ -56,7 +62,9 @@ function saveStore() {
     JSON.stringify(
       {
         devices: Array.from(devices.values()),
-        pings
+        pings,
+        friendRequests,
+        friendships
       },
       null,
       2
@@ -134,6 +142,33 @@ function publicDevice(device) {
     hasPushToken: Boolean(device.pushToken),
     hasWebPush: Boolean(device.webPushSubscription),
     updatedAt: device.updatedAt
+  };
+}
+
+function publicFriend(device) {
+  return {
+    id: device.userID,
+    userID: device.userID,
+    name: device.userName,
+    userName: device.userName,
+    handle: device.inviteCode,
+    inviteCode: device.inviteCode,
+    hasPushToken: Boolean(device.pushToken),
+    hasWebPush: Boolean(device.webPushSubscription)
+  };
+}
+
+function publicFriendRequest(record) {
+  return {
+    id: record.id,
+    senderID: record.senderID,
+    senderName: record.senderName,
+    senderInviteCode: record.senderInviteCode,
+    targetUserID: record.targetUserID,
+    targetInviteCode: record.targetInviteCode,
+    status: record.status,
+    createdAt: record.createdAt,
+    respondedAt: record.respondedAt ?? null
   };
 }
 
@@ -226,8 +261,78 @@ function findDeviceByInviteCode(code) {
   return Array.from(devices.values()).find(device => device.inviteCode === normalized);
 }
 
+function friendshipKey(firstUserID, secondUserID) {
+  return [String(firstUserID), String(secondUserID)].sort().join(":");
+}
+
+function findFriendship(firstUserID, secondUserID) {
+  const key = friendshipKey(firstUserID, secondUserID);
+  return friendships.find(friendship => friendship.key === key);
+}
+
+function ensureFriendship(firstUserID, secondUserID) {
+  const key = friendshipKey(firstUserID, secondUserID);
+  let friendship = friendships.find(item => item.key === key);
+
+  if (!friendship) {
+    friendship = {
+      id: `friendship_${randomUUID()}`,
+      key,
+      userIDs: [String(firstUserID), String(secondUserID)],
+      createdAt: new Date().toISOString()
+    };
+    friendships.unshift(friendship);
+  }
+
+  return friendship;
+}
+
+function pendingFriendRequest(senderID, targetUserID) {
+  return friendRequests.find(record =>
+    record.status === "pending" &&
+    record.senderID === String(senderID) &&
+    record.targetUserID === String(targetUserID)
+  );
+}
+
+function friendsForUser(userID) {
+  const id = String(userID);
+  return friendships
+    .filter(friendship => friendship.userIDs?.includes(id))
+    .map(friendship => friendship.userIDs.find(friendID => friendID !== id))
+    .map(friendID => devices.get(friendID))
+    .filter(Boolean)
+    .map(publicFriend);
+}
+
 function findPingTarget(payload) {
   return devices.get(payload.friendID) ?? findDeviceByInviteCode(payload.friendHandle);
+}
+
+async function notifyFriendRequest(target, record) {
+  if (!target?.webPushSubscription || !hasWebPushConfig()) {
+    return null;
+  }
+
+  try {
+    return await sendWebPushNotification(target.webPushSubscription, {
+      title: "GamePing 친구 요청",
+      body: `${record.senderName}님이 친구 요청을 보냈어.`,
+      requestID: record.id,
+      senderName: record.senderName,
+      url: "/"
+    });
+  } catch (error) {
+    if (error.statusCode === 404 || error.statusCode === 410) {
+      target.webPushSubscription = null;
+    }
+
+    return {
+      skipped: false,
+      statusCode: error.statusCode,
+      error: error.body || error.message
+    };
+  }
 }
 
 const server = createServer(async (request, response) => {
@@ -354,6 +459,209 @@ const server = createServer(async (request, response) => {
         ok: true,
         status: "registered",
         device: publicDevice(devices.get(payload.userID))
+      });
+    } catch (error) {
+      sendJSON(response, 400, {
+        ok: false,
+        error: error.message
+      });
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/friends/")) {
+    const userID = decodeURIComponent(url.pathname.replace("/friends/", ""));
+
+    sendJSON(response, 200, {
+      ok: true,
+      friends: friendsForUser(userID)
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname.startsWith("/friend-requests/")) {
+    const userID = decodeURIComponent(url.pathname.replace("/friend-requests/", ""));
+    const incoming = friendRequests
+      .filter(record => record.targetUserID === userID && record.status === "pending")
+      .map(publicFriendRequest);
+    const outgoing = friendRequests
+      .filter(record => record.senderID === userID && record.status === "pending")
+      .map(publicFriendRequest);
+
+    sendJSON(response, 200, {
+      ok: true,
+      incoming,
+      outgoing
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/friend-requests") {
+    try {
+      const payload = await readJSON(request);
+      const senderID = String(payload.senderID ?? "").trim();
+      const senderName = String(payload.senderName ?? "").trim() || "플레이어";
+      const senderInviteCode = normalizeInviteCode(payload.senderInviteCode);
+      const target = findDeviceByInviteCode(payload.targetInviteCode ?? payload.friendCode ?? payload.friendHandle);
+
+      if (!senderID || !senderInviteCode) {
+        sendJSON(response, 422, {
+          ok: false,
+          error: "senderID and senderInviteCode are required"
+        });
+        return;
+      }
+
+      if (!target) {
+        sendJSON(response, 404, {
+          ok: false,
+          error: "Invite code not found"
+        });
+        return;
+      }
+
+      if (target.userID === senderID || target.inviteCode === senderInviteCode) {
+        sendJSON(response, 422, {
+          ok: false,
+          error: "Cannot add yourself"
+        });
+        return;
+      }
+
+      if (findFriendship(senderID, target.userID)) {
+        sendJSON(response, 200, {
+          ok: true,
+          status: "friends",
+          friend: publicFriend(target)
+        });
+        return;
+      }
+
+      const reverseRequest = pendingFriendRequest(target.userID, senderID);
+      if (reverseRequest) {
+        reverseRequest.status = "accepted";
+        reverseRequest.respondedAt = new Date().toISOString();
+        const friendship = ensureFriendship(senderID, target.userID);
+        saveStore();
+
+        sendJSON(response, 200, {
+          ok: true,
+          status: "accepted",
+          request: publicFriendRequest(reverseRequest),
+          friendship,
+          friend: publicFriend(target)
+        });
+        return;
+      }
+
+      const existingRequest = pendingFriendRequest(senderID, target.userID);
+      if (existingRequest) {
+        sendJSON(response, 200, {
+          ok: true,
+          status: "pending",
+          request: publicFriendRequest(existingRequest)
+        });
+        return;
+      }
+
+      const sender = devices.get(senderID) ?? {
+        userID: senderID,
+        userName: senderName,
+        inviteCode: senderInviteCode
+      };
+      const record = {
+        id: `friend_request_${randomUUID()}`,
+        senderID,
+        senderName: sender.userName ?? senderName,
+        senderInviteCode: sender.inviteCode ?? senderInviteCode,
+        targetUserID: target.userID,
+        targetInviteCode: target.inviteCode,
+        status: "pending",
+        createdAt: new Date().toISOString(),
+        respondedAt: null,
+        push: null
+      };
+
+      friendRequests.unshift(record);
+      friendRequests.splice(100);
+      saveStore();
+
+      record.push = await notifyFriendRequest(target, record);
+      saveStore();
+
+      sendJSON(response, 202, {
+        ok: true,
+        status: "pending",
+        request: publicFriendRequest(record)
+      });
+    } catch (error) {
+      sendJSON(response, 400, {
+        ok: false,
+        error: error.message
+      });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/friend-requests/") && url.pathname.endsWith("/respond")) {
+    try {
+      const requestID = decodeURIComponent(
+        url.pathname.slice("/friend-requests/".length, -"/respond".length)
+      );
+      const payload = await readJSON(request);
+      const userID = String(payload.userID ?? "").trim();
+      const action = String(payload.action ?? "").trim().toLowerCase();
+      const record = friendRequests.find(item => item.id === requestID);
+
+      if (!record || record.status !== "pending") {
+        sendJSON(response, 404, {
+          ok: false,
+          error: "Friend request not found"
+        });
+        return;
+      }
+
+      if (record.targetUserID !== userID) {
+        sendJSON(response, 403, {
+          ok: false,
+          error: "Only the target user can respond"
+        });
+        return;
+      }
+
+      if (action !== "accept" && action !== "reject") {
+        sendJSON(response, 422, {
+          ok: false,
+          error: "action must be accept or reject"
+        });
+        return;
+      }
+
+      record.status = action === "accept" ? "accepted" : "rejected";
+      record.respondedAt = new Date().toISOString();
+
+      const sender = devices.get(record.senderID) ?? {
+        userID: record.senderID,
+        userName: record.senderName,
+        inviteCode: record.senderInviteCode
+      };
+
+      let friendship = null;
+      let friend = null;
+
+      if (action === "accept") {
+        friendship = ensureFriendship(record.senderID, record.targetUserID);
+        friend = publicFriend(sender);
+      }
+
+      saveStore();
+
+      sendJSON(response, 200, {
+        ok: true,
+        status: record.status,
+        request: publicFriendRequest(record),
+        friendship,
+        friend
       });
     } catch (error) {
       sendJSON(response, 400, {

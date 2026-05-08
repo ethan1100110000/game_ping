@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-title" content="GamePing">
   <title>GamePing</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css?v=8">
+  <link rel="stylesheet" href="/styles.css?v=9">
 </head>
 <body>
   <main class="app-shell">
@@ -42,6 +42,10 @@
         </div>
       </div>
       <div class="list" id="friendList"></div>
+      <div class="request-box hidden" id="friendRequestPanel">
+        <div class="request-heading">친구 요청</div>
+        <div class="request-list" id="friendRequestList"></div>
+      </div>
     </section>
 
     <section class="party-box hidden" id="partyPanel">
@@ -131,11 +135,11 @@
         <input id="friendCodeInput" autocapitalize="characters" autocomplete="off" placeholder="GP-ABC123">
       </label>
 
-      <button class="primary-action" id="resolveFriendButton" type="button">코드로 추가</button>
+      <button class="primary-action" id="resolveFriendButton" type="button">친구 요청 보내기</button>
     </form>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=8" type="module"></script>
+  <script src="/app.js?v=9" type="module"></script>
 </body>
 </html>
