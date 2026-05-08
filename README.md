@@ -47,9 +47,17 @@ https://your-gameping-url.example/?token=YOUR_TOKEN
 
 The web app stores the token locally and removes it from the visible URL after opening.
 
+The current Render deployment URL is:
+
+```text
+https://gameping.onrender.com
+```
+
+Open the first shared link with the production token once on each phone, then tap `알림 켜기`. On iPhone, Safari Web Push works best after adding GamePing to the Home Screen.
+
 The app posts ping requests to the configured server URL. If the server is unavailable, the app still records the ping and shows a local notification preview.
 
-The app also polls its server inbox while open, so two iPhones on the same Wi-Fi can test received calls even before APNs credentials are attached. APNs is still the production path for locked-screen/background delivery.
+The web app uses Web Push when VAPID keys are configured and falls back to inbox polling while open. APNs is still the native-app path for locked-screen/background delivery.
 
 Useful endpoints:
 
@@ -57,6 +65,7 @@ Useful endpoints:
 - `GET /pings`
 - `POST /pings`
 - `GET /inbox/:userID`
+- `GET /push/public-key`
 - `GET /devices`
 - `POST /devices`
 - `GET /invites/:inviteCode`

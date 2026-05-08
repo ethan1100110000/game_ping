@@ -12,9 +12,12 @@ applySharedToken();
 let selectedMessage = "게임 시작";
 let toastTimer = null;
 let audioContext = null;
+let serviceWorkerRegistration = null;
 
 const els = {
   statusText: document.querySelector("#statusText"),
+  pushStatus: document.querySelector("#pushStatus"),
+  pushButton: document.querySelector("#pushButton"),
   profileButton: document.querySelector("#profileButton"),
   addFriendButton: document.querySelector("#addFriendButton"),
   partyButton: document.querySelector("#partyButton"),
@@ -133,6 +136,7 @@ async function checkHealth() {
   try {
     const health = await api("/health");
     els.statusText.textContent = health.authRequired && !state.apiToken ? "토큰 필요" : "서버 연결됨";
+    updatePushUI();
     return health.ok;
   } catch {
     els.statusText.textContent = "서버 연결 실패";
@@ -140,7 +144,7 @@ async function checkHealth() {
   }
 }
 
-async function registerDevice() {
+async function registerDevice(webPushSubscription = null) {
   await api("/devices", {
     method: "POST",
     body: JSON.stringify({
@@ -148,10 +152,106 @@ async function registerDevice() {
       userName: state.profile.userName,
       inviteCode: state.profile.inviteCode,
       pushToken: `WEB-${state.profile.userID}`,
+      webPushSubscription: webPushSubscription?.toJSON?.() ?? webPushSubscription ?? undefined,
       platform: "web",
       appVersion: "web"
     })
   });
+}
+
+function pushSupported() {
+  return Boolean("Notification" in window && "serviceWorker" in navigator && "PushManager" in window);
+}
+
+function updatePushUI(message = null) {
+  if (!pushSupported()) {
+    els.pushStatus.textContent = "알림 미지원";
+    els.pushButton.disabled = true;
+    return;
+  }
+
+  if (!state.apiToken) {
+    els.pushStatus.textContent = "토큰 필요";
+    els.pushButton.disabled = false;
+    els.pushButton.textContent = "토큰 입력";
+    els.pushButton.classList.remove("enabled");
+    return;
+  }
+
+  if (Notification.permission === "granted") {
+    els.pushStatus.textContent = message ?? "알림 켜짐";
+    els.pushButton.disabled = false;
+    els.pushButton.textContent = "알림 켜짐";
+    els.pushButton.classList.add("enabled");
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    els.pushStatus.textContent = "알림 차단됨";
+    els.pushButton.disabled = true;
+    els.pushButton.textContent = "차단됨";
+    els.pushButton.classList.remove("enabled");
+    return;
+  }
+
+  els.pushStatus.textContent = message ?? "알림 꺼짐";
+  els.pushButton.disabled = false;
+  els.pushButton.textContent = "알림 켜기";
+  els.pushButton.classList.remove("enabled");
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = "=".repeat((4 - value.length % 4) % 4);
+  const base64 = `${value}${padding}`.replaceAll("-", "+").replaceAll("_", "/");
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(character => character.charCodeAt(0)));
+}
+
+async function getExistingPushSubscription() {
+  if (!pushSupported() || Notification.permission !== "granted") return null;
+  const registration = serviceWorkerRegistration ?? await navigator.serviceWorker.ready;
+  return await registration.pushManager.getSubscription();
+}
+
+async function enablePushNotifications() {
+  if (!pushSupported()) {
+    toast("이 브라우저는 알림 미지원");
+    updatePushUI();
+    return;
+  }
+
+  if (!state.apiToken) {
+    toast("토큰 먼저 입력");
+    openProfile();
+    return;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      updatePushUI();
+      toast("알림 권한 필요");
+      return;
+    }
+
+    const registration = serviceWorkerRegistration ?? await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+
+    if (!subscription) {
+      const payload = await api("/push/public-key");
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(payload.publicKey)
+      });
+    }
+
+    await registerDevice(subscription);
+    updatePushUI("알림 등록됨");
+    toast("알림 켜짐");
+  } catch {
+    updatePushUI("알림 등록 실패");
+    toast("알림 등록 실패");
+  }
 }
 
 async function resolveFriend() {
@@ -399,8 +499,9 @@ async function saveProfile() {
   saveState();
   render();
   try {
-    await registerDevice();
+    await registerDevice(await getExistingPushSubscription());
     await pollInbox({ notify: false });
+    updatePushUI();
     toast("저장 완료");
     els.profileDialog.close();
   } catch {
@@ -450,6 +551,7 @@ els.partyButton.addEventListener("click", pingParty);
 els.copyInviteButton.addEventListener("click", copyInvite);
 els.saveProfileButton.addEventListener("click", saveProfile);
 els.resolveFriendButton.addEventListener("click", resolveFriend);
+els.pushButton.addEventListener("click", enablePushNotifications);
 
 els.friendList.addEventListener("click", event => {
   const button = event.target.closest("[data-ping]");
@@ -458,14 +560,25 @@ els.friendList.addEventListener("click", event => {
   if (friend) pingFriend(friend);
 });
 
+render();
+updatePushUI();
+
 if ("serviceWorker" in navigator && window.isSecureContext) {
-  navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  navigator.serviceWorker.register("/service-worker.js")
+    .then(registration => {
+      serviceWorkerRegistration = registration;
+      updatePushUI();
+      return registration;
+    })
+    .catch(() => {
+      updatePushUI("알림 준비 실패");
+    });
 }
 
-render();
 checkHealth()
-  .then(registerDevice)
+  .then(async () => registerDevice(await getExistingPushSubscription()))
   .then(() => pollInbox({ notify: false }))
+  .then(updatePushUI)
   .catch(() => {
     els.statusText.textContent = "서버 연결 실패";
   });

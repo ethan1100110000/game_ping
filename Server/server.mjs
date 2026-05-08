@@ -5,11 +5,12 @@ import { networkInterfaces } from "node:os";
 import { dirname, extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasAPNsConfig, sendAPNsNotification } from "./apns.mjs";
+import { getWebPushPublicKey, hasWebPushConfig, sendWebPushNotification } from "./webPush.mjs";
 
 const host = process.env.HOST ?? (process.env.NODE_ENV === "production" ? "0.0.0.0" : "127.0.0.1");
 const port = Number.parseInt(process.env.PORT ?? "8787", 10);
 const apiToken = process.env.GAMEPING_API_TOKEN ?? "";
-const publicURL = process.env.PUBLIC_URL ?? "";
+const publicURL = process.env.PUBLIC_URL ?? process.env.RENDER_EXTERNAL_URL ?? "";
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(serverDir, "public");
 const dataDir = process.env.GAMEPING_DATA_DIR ?? join(serverDir, "data");
@@ -131,6 +132,7 @@ function publicDevice(device) {
     inviteCode: device.inviteCode,
     platform: device.platform,
     hasPushToken: Boolean(device.pushToken),
+    hasWebPush: Boolean(device.webPushSubscription),
     updatedAt: device.updatedAt
   };
 }
@@ -266,9 +268,26 @@ const server = createServer(async (request, response) => {
       pings: pings.length,
       devices: devices.size,
       apnsConfigured: hasAPNsConfig(),
+      webPushConfigured: hasWebPushConfig(),
       authRequired: Boolean(apiToken),
       dataPath,
       urls: localURLs()
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/push/public-key") {
+    if (!hasWebPushConfig()) {
+      sendJSON(response, 503, {
+        ok: false,
+        error: "Web Push is not configured"
+      });
+      return;
+    }
+
+    sendJSON(response, 200, {
+      ok: true,
+      publicKey: getWebPushPublicKey()
     });
     return;
   }
@@ -318,11 +337,13 @@ const server = createServer(async (request, response) => {
         return;
       }
 
+      const previous = devices.get(payload.userID);
       devices.set(payload.userID, {
         userID: String(payload.userID),
         userName: String(payload.userName),
         inviteCode,
         pushToken: payload.pushToken ? String(payload.pushToken) : null,
+        webPushSubscription: payload.webPushSubscription ?? previous?.webPushSubscription ?? null,
         platform: payload.platform ?? "ios",
         appVersion: payload.appVersion ?? "dev",
         updatedAt: new Date().toISOString()
@@ -390,7 +411,34 @@ const server = createServer(async (request, response) => {
         push: null
       };
 
-      if (target?.pushToken) {
+      if (target?.webPushSubscription) {
+        try {
+          record.webPush = await sendWebPushNotification(target.webPushSubscription, {
+            title: `${payload.senderName ?? "GamePing"} 호출`,
+            body: payload.notificationBody ?? payload.message,
+            pingID: record.id,
+            senderName: payload.senderName,
+            message: payload.message,
+            url: "/"
+          });
+          if (!record.webPush.skipped) {
+            record.status = "sent";
+          }
+        } catch (error) {
+          record.status = "queued";
+          record.webPush = {
+            skipped: false,
+            statusCode: error.statusCode,
+            error: error.body || error.message
+          };
+
+          if (error.statusCode === 404 || error.statusCode === 410) {
+            target.webPushSubscription = null;
+          }
+        }
+      }
+
+      if (target?.pushToken && !String(target.pushToken).startsWith("WEB-")) {
         try {
           record.push = await sendAPNsNotification({
             token: target.pushToken,
@@ -402,7 +450,9 @@ const server = createServer(async (request, response) => {
               message: payload.message
             }
           });
-          record.status = record.push.skipped ? "queued" : "sent";
+          if (!record.push.skipped) {
+            record.status = "sent";
+          }
         } catch (error) {
           record.status = "queued";
           record.push = {

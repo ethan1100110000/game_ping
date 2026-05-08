@@ -27,10 +27,13 @@ NODE_ENV=production
 HOST=0.0.0.0
 GAMEPING_DATA_DIR=/var/data
 GAMEPING_API_TOKEN=<long-random-token>
-PUBLIC_URL=https://your-gameping-url.onrender.com
+VAPID_PUBLIC_KEY=<web-push-public-key>
+VAPID_PRIVATE_KEY=<web-push-private-key>
+VAPID_SUBJECT=mailto:you@example.com
 ```
 
 Keep `GAMEPING_API_TOKEN` somewhere safe. You need the same value in the first shared link.
+Render also sets `RENDER_EXTERNAL_URL`; the server uses that as its public URL automatically.
 
 Share the first invite link like this:
 

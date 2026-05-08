@@ -1,5 +1,6 @@
 .DS_Store
 DerivedData/
+node_modules/
 Server/data/
 *.xcuserstate
 *.xcodeproj/xcuserdata/

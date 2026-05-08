@@ -186,6 +186,47 @@ button {
   box-shadow: inset 0 0 0 1px rgba(214, 220, 223, 0.75);
 }
 
+.push-row {
+  display: grid;
+  grid-template-columns: 1fr 104px;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  margin-bottom: 16px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.push-row span {
+  min-width: 0;
+  padding-left: 10px;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 900;
+  overflow-wrap: anywhere;
+}
+
+.push-row button {
+  height: 38px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--ink);
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.push-row button.enabled {
+  background: var(--green);
+}
+
+.push-row button:disabled {
+  color: var(--muted);
+  background: #e4e8ea;
+  cursor: default;
+}
+
 .party-button {
   display: flex;
   align-items: center;

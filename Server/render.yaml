@@ -16,6 +16,12 @@ services:
         value: /var/data
       - key: GAMEPING_API_TOKEN
         sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
     disk:
       name: gameping-data
       mountPath: /var/data

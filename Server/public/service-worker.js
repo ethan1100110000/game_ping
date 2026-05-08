@@ -1,4 +1,4 @@
-const CACHE_NAME = "gameping-web-v1";
+const CACHE_NAME = "gameping-web-v2";
 const APP_SHELL = [
   "/",
   "/styles.css",
@@ -23,5 +23,40 @@ self.addEventListener("fetch", event => {
   if (event.request.method !== "GET") return;
   event.respondWith(
     fetch(event.request).catch(() => caches.match(event.request).then(response => response ?? caches.match("/")))
+  );
+});
+
+self.addEventListener("push", event => {
+  const data = event.data?.json() ?? {};
+  const title = data.title || "GamePing 호출";
+  const options = {
+    body: data.body || "게임 시작했어. 들어와!",
+    icon: "/icon.svg",
+    badge: "/icon.svg",
+    tag: data.pingID || "gameping-ping",
+    data: {
+      url: data.url || "/"
+    },
+    vibrate: [120, 60, 120]
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener("notificationclick", event => {
+  event.notification.close();
+  const targetURL = new URL(event.notification.data?.url || "/", self.location.origin).href;
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then(clientList => {
+      for (const client of clientList) {
+        if (client.url.startsWith(self.location.origin) && "focus" in client) {
+          client.navigate(targetURL);
+          return client.focus();
+        }
+      }
+
+      return clients.openWindow(targetURL);
+    })
   );
 });

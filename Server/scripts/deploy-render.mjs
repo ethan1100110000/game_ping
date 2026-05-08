@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import webPush from "web-push";
 
 const apiKey = requiredEnv("RENDER_API_KEY");
 const repoURL = requiredEnv("GITHUB_REPO_URL");
@@ -7,6 +8,12 @@ const branch = process.env.GITHUB_BRANCH ?? "main";
 const plan = process.env.RENDER_PLAN ?? "free";
 const region = process.env.RENDER_REGION ?? "oregon";
 const appToken = process.env.GAMEPING_API_TOKEN ?? randomBytes(24).toString("hex");
+const generatedVapid = process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY
+  ? null
+  : webPush.generateVAPIDKeys();
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY ?? generatedVapid.publicKey;
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY ?? generatedVapid.privateKey;
+const vapidSubject = process.env.VAPID_SUBJECT ?? "mailto:gameping@example.com";
 
 function requiredEnv(name) {
   const value = process.env[name]?.trim();
@@ -41,7 +48,10 @@ function servicePayload(ownerId) {
     { key: "NODE_ENV", value: "production" },
     { key: "HOST", value: "0.0.0.0" },
     { key: "GAMEPING_DATA_DIR", value: plan === "free" ? "/tmp/gameping-data" : "/var/data" },
-    { key: "GAMEPING_API_TOKEN", value: appToken }
+    { key: "GAMEPING_API_TOKEN", value: appToken },
+    { key: "VAPID_PUBLIC_KEY", value: vapidPublicKey },
+    { key: "VAPID_PRIVATE_KEY", value: vapidPrivateKey },
+    { key: "VAPID_SUBJECT", value: vapidSubject }
   ];
 
   const details = {
@@ -100,6 +110,7 @@ console.log("Render service created.");
 console.log(`Dashboard: ${dashboardURL}`);
 console.log(`Public URL: ${publicURL}`);
 console.log(`GamePing token: ${appToken}`);
+console.log(`VAPID public key: ${vapidPublicKey}`);
 if (typeof publicURL === "string" && publicURL.startsWith("http")) {
   console.log(`Friend link: ${publicURL}/?token=${encodeURIComponent(appToken)}`);
 }
