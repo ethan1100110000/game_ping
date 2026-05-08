@@ -40,8 +40,12 @@ const els = {
 function loadState() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
   if (saved?.profile?.userID && saved?.profile?.inviteCode) {
+    const userName = saved.profile.userName === "나" ? "플레이어" : saved.profile.userName;
     return {
-      profile: saved.profile,
+      profile: {
+        ...saved.profile,
+        userName
+      },
       friends: Array.isArray(saved.friends) ? saved.friends : [],
       recent: Array.isArray(saved.recent) ? saved.recent : [],
       inbox: Array.isArray(saved.inbox) ? saved.inbox : [],
@@ -53,7 +57,7 @@ function loadState() {
   return {
     profile: {
       userID: makeID(),
-      userName: "나",
+      userName: "플레이어",
       inviteCode: makeInviteCode()
     },
     friends: [],
@@ -404,7 +408,7 @@ function timeLabel(value) {
 }
 
 function render() {
-  els.profileButton.textContent = initials(state.profile.userName);
+  els.profileButton.setAttribute("aria-label", `${state.profile.userName} 정보`);
   renderFriends();
   renderInbox();
   renderRecent();
@@ -491,12 +495,13 @@ function openProfile() {
   els.profileNameInput.value = state.profile.userName;
   els.inviteCodeInput.value = state.profile.inviteCode;
   els.apiTokenInput.value = state.apiToken;
+  updatePushUI();
   els.profileDialog.showModal();
 }
 
 async function saveProfile() {
   const name = els.profileNameInput.value.trim();
-  state.profile.userName = name || "나";
+  state.profile.userName = name || "플레이어";
   state.apiToken = els.apiTokenInput.value.trim();
   saveState();
   render();

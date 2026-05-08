@@ -3,36 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#16875f">
+  <meta name="theme-color" content="#0b0d10">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="GamePing">
   <title>GamePing</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css?v=6">
+  <link rel="stylesheet" href="/styles.css?v=7">
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
-      <button class="icon-button" id="profileButton" type="button" aria-label="프로필">내</button>
+      <button class="icon-button menu-button" id="profileButton" type="button" aria-label="내 정보">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
       <h1>GamePing</h1>
       <button class="icon-button" id="addFriendButton" type="button" aria-label="친구 추가">+</button>
     </header>
-
-    <section class="hero">
-      <div>
-        <p class="eyebrow" id="statusText">서버 확인 중</p>
-        <h2>원터치 호출</h2>
-      </div>
-      <div class="controller-mark" aria-hidden="true">
-        <span></span>
-        <span></span>
-      </div>
-    </section>
-
-    <section class="push-row" aria-label="알림 상태">
-      <span id="pushStatus">알림 확인 중</span>
-      <button id="pushButton" type="button">알림 켜기</button>
-    </section>
 
     <section class="message-tabs" aria-label="메시지 선택">
       <button class="selected" type="button" data-message="게임 시작">게임 시작</button>
@@ -74,9 +62,23 @@
   <dialog id="profileDialog">
     <form method="dialog" class="sheet">
       <div class="sheet-header">
-        <h3>프로필</h3>
+        <h3>내 정보</h3>
         <button class="text-button" value="cancel" type="submit">닫기</button>
       </div>
+
+      <section class="status-card">
+        <div class="status-row">
+          <span>서버</span>
+          <strong id="statusText">서버 확인 중</strong>
+        </div>
+        <div class="status-row">
+          <span>알림</span>
+          <div class="status-action">
+            <strong id="pushStatus">알림 확인 중</strong>
+            <button id="pushButton" type="button">알림 켜기</button>
+          </div>
+        </div>
+      </section>
 
       <label>
         표시 이름
@@ -91,10 +93,13 @@
         </div>
       </label>
 
-      <label>
-        API 토큰
-        <input id="apiTokenInput" autocomplete="off" placeholder="서버 토큰 사용 시 입력">
-      </label>
+      <details class="advanced-settings">
+        <summary>고급 설정</summary>
+        <label>
+          API 토큰
+          <input id="apiTokenInput" autocomplete="off" placeholder="서버 토큰 사용 시 입력">
+        </label>
+      </details>
 
       <button class="primary-action" id="saveProfileButton" type="button">저장</button>
     </form>
@@ -117,6 +122,6 @@
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=6" type="module"></script>
+  <script src="/app.js?v=7" type="module"></script>
 </body>
 </html>
