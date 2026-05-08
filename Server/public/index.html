@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-title" content="GamePing">
   <title>GamePing</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css?v=7">
+  <link rel="stylesheet" href="/styles.css?v=8">
 </head>
 <body>
   <main class="app-shell">
@@ -29,31 +29,45 @@
       <button type="button" data-message="한 판 더">한 판 더</button>
     </section>
 
-    <button class="party-button" id="partyButton" type="button">
-      <span>파티 호출</span>
-      <strong>보내기</strong>
-    </button>
+    <section class="panel">
+      <div class="section-heading with-actions">
+        <div class="heading-title">
+          <span class="heading-dot"></span>
+          <h3>친구</h3>
+        </div>
+        <div class="section-actions">
+          <button class="secondary-action" id="partyCreateButton" type="button">파티 만들기</button>
+          <button class="secondary-action hidden" id="partyCancelButton" type="button">취소</button>
+          <button class="primary-small hidden" id="partyDoneButton" type="button">완료</button>
+        </div>
+      </div>
+      <div class="list" id="friendList"></div>
+    </section>
+
+    <section class="party-box hidden" id="partyPanel">
+      <button class="party-button" id="partyButton" type="button">
+        <span>파티 호출</span>
+        <strong>보내기</strong>
+      </button>
+      <div class="party-list" id="partyList"></div>
+    </section>
 
     <section class="panel">
       <div class="section-heading">
-        <span class="heading-dot"></span>
-        <h3>받은 호출</h3>
+        <div class="heading-title">
+          <span class="heading-dot"></span>
+          <h3>받은 호출</h3>
+        </div>
       </div>
       <div class="list" id="inboxList"></div>
     </section>
 
     <section class="panel">
       <div class="section-heading">
-        <span class="heading-dot"></span>
-        <h3>친구</h3>
-      </div>
-      <div class="list" id="friendList"></div>
-    </section>
-
-    <section class="panel">
-      <div class="section-heading">
-        <span class="heading-dot"></span>
-        <h3>최근 호출</h3>
+        <div class="heading-title">
+          <span class="heading-dot"></span>
+          <h3>최근 호출</h3>
+        </div>
       </div>
       <div class="list" id="recentList"></div>
     </section>
@@ -122,6 +136,6 @@
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/app.js?v=7" type="module"></script>
+  <script src="/app.js?v=8" type="module"></script>
 </body>
 </html>

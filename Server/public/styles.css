@@ -45,6 +45,10 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 
+.hidden {
+  display: none !important;
+}
+
 .app-shell {
   width: min(100%, 520px);
   min-height: 100vh;
@@ -129,7 +133,6 @@ button {
   align-items: center;
   width: 100%;
   min-height: 70px;
-  margin-bottom: 20px;
   padding: 0 18px;
   border-radius: 8px;
   color: #07100c;
@@ -153,6 +156,55 @@ button {
   font-weight: 900;
 }
 
+.party-box {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.party-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.party-member {
+  display: inline-grid;
+  grid-template-columns: 24px auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 9px 6px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface-2);
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.party-member span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.party-avatar {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 950;
+}
+
 .panel {
   margin-bottom: 20px;
 }
@@ -160,8 +212,16 @@ button {
 .section-heading {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   margin-bottom: 9px;
+}
+
+.heading-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .section-heading h3 {
@@ -175,6 +235,42 @@ button {
   width: 8px;
   height: 18px;
   border-radius: 4px;
+  background: var(--green);
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.secondary-action,
+.primary-small {
+  min-height: 34px;
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.secondary-action {
+  color: var(--ink);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.secondary-action.editing {
+  color: var(--green);
+}
+
+.secondary-action:disabled {
+  color: var(--muted-2);
+  cursor: default;
+}
+
+.primary-small {
+  color: #07100c;
   background: var(--green);
 }
 
@@ -210,6 +306,10 @@ button {
 
 .friend-row {
   grid-template-columns: 52px minmax(0, 1fr) 84px;
+}
+
+.friend-row.party-edit {
+  grid-template-columns: 52px minmax(0, 1fr) 44px;
 }
 
 .inbox-row,
@@ -269,6 +369,47 @@ button {
 .call-button.cooldown {
   color: var(--muted);
   background: var(--surface-3);
+}
+
+.party-check {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+}
+
+.party-check input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.party-check span {
+  position: relative;
+  display: block;
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.party-check input:checked + span {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.party-check input:checked + span::after {
+  position: absolute;
+  left: 7px;
+  top: 3px;
+  width: 7px;
+  height: 13px;
+  border-right: 3px solid #07100c;
+  border-bottom: 3px solid #07100c;
+  transform: rotate(42deg);
+  content: "";
 }
 
 .time-text {
@@ -470,6 +611,10 @@ input:focus {
 
   .friend-row {
     grid-template-columns: 48px minmax(0, 1fr) 76px;
+  }
+
+  .friend-row.party-edit {
+    grid-template-columns: 48px minmax(0, 1fr) 40px;
   }
 
   .avatar {

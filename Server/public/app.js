@@ -14,6 +14,8 @@ let toastTimer = null;
 let audioContext = null;
 let serviceWorkerRegistration = null;
 let serverAuthRequired = false;
+let isPartyEditing = false;
+let draftPartyIDs = new Set(state.partyFriendIDs);
 
 const els = {
   statusText: document.querySelector("#statusText"),
@@ -21,7 +23,12 @@ const els = {
   pushButton: document.querySelector("#pushButton"),
   profileButton: document.querySelector("#profileButton"),
   addFriendButton: document.querySelector("#addFriendButton"),
+  partyCreateButton: document.querySelector("#partyCreateButton"),
+  partyCancelButton: document.querySelector("#partyCancelButton"),
+  partyDoneButton: document.querySelector("#partyDoneButton"),
+  partyPanel: document.querySelector("#partyPanel"),
   partyButton: document.querySelector("#partyButton"),
+  partyList: document.querySelector("#partyList"),
   friendList: document.querySelector("#friendList"),
   inboxList: document.querySelector("#inboxList"),
   recentList: document.querySelector("#recentList"),
@@ -50,6 +57,7 @@ function loadState() {
       recent: Array.isArray(saved.recent) ? saved.recent : [],
       inbox: Array.isArray(saved.inbox) ? saved.inbox : [],
       apiToken: saved.apiToken ?? "",
+      partyFriendIDs: Array.isArray(saved.partyFriendIDs) ? saved.partyFriendIDs : [],
       lastPingAt: saved.lastPingAt ?? {}
     };
   }
@@ -64,6 +72,7 @@ function loadState() {
     recent: [],
     inbox: [],
     apiToken: "",
+    partyFriendIDs: [],
     lastPingAt: {}
   };
 }
@@ -348,18 +357,44 @@ async function pingFriend(friend, shouldToast = true) {
 }
 
 async function pingParty() {
-  if (state.friends.length === 0) {
-    toast("친구를 먼저 추가해줘.");
+  const friends = partyFriends();
+  if (friends.length === 0) {
+    toast("파티를 먼저 만들어줘.");
     return;
   }
 
   let count = 0;
-  for (const friend of state.friends) {
+  for (const friend of friends) {
     if (await pingFriend(friend, false)) {
       count += 1;
     }
   }
   toast(count > 0 ? `${count}명 호출 완료` : "호출 가능한 친구가 없어.");
+}
+
+function startPartyEdit() {
+  if (state.friends.length === 0) {
+    toast("친구를 먼저 추가해줘.");
+    return;
+  }
+
+  draftPartyIDs = new Set(state.partyFriendIDs);
+  isPartyEditing = true;
+  render();
+}
+
+function cancelPartyEdit() {
+  draftPartyIDs = new Set(state.partyFriendIDs);
+  isPartyEditing = false;
+  render();
+}
+
+function savePartyEdit() {
+  state.partyFriendIDs = [...draftPartyIDs];
+  isPartyEditing = false;
+  saveState();
+  render();
+  toast(state.partyFriendIDs.length > 0 ? `${state.partyFriendIDs.length}명 파티 생성` : "파티 비움");
 }
 
 async function pollInbox({ notify = true } = {}) {
@@ -409,32 +444,87 @@ function timeLabel(value) {
 
 function render() {
   els.profileButton.setAttribute("aria-label", `${state.profile.userName} 정보`);
+  syncPartyWithFriends();
   renderFriends();
+  renderParty();
   renderInbox();
   renderRecent();
 }
 
+function syncPartyWithFriends() {
+  const friendIDs = new Set(state.friends.map(friend => friend.id));
+  const nextPartyIDs = state.partyFriendIDs.filter(id => friendIDs.has(id));
+  if (nextPartyIDs.length !== state.partyFriendIDs.length) {
+    state.partyFriendIDs = nextPartyIDs;
+    saveState();
+  }
+  draftPartyIDs = new Set([...draftPartyIDs].filter(id => friendIDs.has(id)));
+}
+
+function partyFriends() {
+  const partyIDs = new Set(state.partyFriendIDs);
+  return state.friends.filter(friend => partyIDs.has(friend.id));
+}
+
 function renderFriends() {
   if (state.friends.length === 0) {
+    isPartyEditing = false;
+    els.partyCreateButton.textContent = "파티 만들기";
+    els.partyCreateButton.disabled = true;
+    els.partyCancelButton.classList.add("hidden");
+    els.partyDoneButton.classList.add("hidden");
     els.friendList.innerHTML = `<div class="empty">오른쪽 위 + 버튼으로 친구 추가</div>`;
     return;
   }
 
+  els.partyCreateButton.disabled = false;
+  els.partyCreateButton.textContent = isPartyEditing
+    ? `${draftPartyIDs.size}명 선택`
+    : state.partyFriendIDs.length > 0 ? "파티 편집" : "파티 만들기";
+  els.partyCreateButton.classList.toggle("editing", isPartyEditing);
+  els.partyCancelButton.classList.toggle("hidden", !isPartyEditing);
+  els.partyDoneButton.classList.toggle("hidden", !isPartyEditing);
+
   els.friendList.innerHTML = state.friends.map(friend => {
     const seconds = cooldownSeconds(friend.id);
     return `
-      <article class="friend-row">
+      <article class="friend-row ${isPartyEditing ? "party-edit" : ""}">
         <div class="avatar" style="background:${friend.color}">${initials(friend.name)}</div>
         <div>
           <div class="row-title">${escapeHTML(friend.name)}</div>
           <div class="row-subtitle">${escapeHTML(friend.handle)}</div>
         </div>
-        <button class="call-button ${seconds > 0 ? "cooldown" : ""}" data-ping="${friend.id}" type="button">
-          ${seconds > 0 ? `${seconds}s` : "호출"}
-        </button>
+        ${isPartyEditing ? `
+          <label class="party-check" aria-label="${escapeHTML(friend.name)} 파티 선택">
+            <input data-party-check="${friend.id}" type="checkbox" ${draftPartyIDs.has(friend.id) ? "checked" : ""}>
+            <span></span>
+          </label>
+        ` : `
+          <button class="call-button ${seconds > 0 ? "cooldown" : ""}" data-ping="${friend.id}" type="button">
+            ${seconds > 0 ? `${seconds}s` : "호출"}
+          </button>
+        `}
       </article>
     `;
   }).join("");
+}
+
+function renderParty() {
+  const friends = partyFriends();
+  const shouldShow = !isPartyEditing && friends.length > 0;
+  els.partyPanel.classList.toggle("hidden", !shouldShow);
+
+  if (!shouldShow) {
+    els.partyList.innerHTML = "";
+    return;
+  }
+
+  els.partyList.innerHTML = friends.map(friend => `
+    <div class="party-member">
+      <div class="party-avatar" style="background:${friend.color}">${initials(friend.name)}</div>
+      <span>${escapeHTML(friend.name)}</span>
+    </div>
+  `).join("");
 }
 
 function renderInbox() {
@@ -554,6 +644,12 @@ document.querySelectorAll("[data-message]").forEach(button => {
 
 els.profileButton.addEventListener("click", openProfile);
 els.addFriendButton.addEventListener("click", () => els.friendDialog.showModal());
+els.partyCreateButton.addEventListener("click", () => {
+  if (isPartyEditing) return;
+  startPartyEdit();
+});
+els.partyCancelButton.addEventListener("click", cancelPartyEdit);
+els.partyDoneButton.addEventListener("click", savePartyEdit);
 els.partyButton.addEventListener("click", pingParty);
 els.copyInviteButton.addEventListener("click", copyInvite);
 els.saveProfileButton.addEventListener("click", saveProfile);
@@ -565,6 +661,18 @@ els.friendList.addEventListener("click", event => {
   if (!button) return;
   const friend = state.friends.find(item => item.id === button.dataset.ping);
   if (friend) pingFriend(friend);
+});
+
+els.friendList.addEventListener("change", event => {
+  const checkbox = event.target.closest("[data-party-check]");
+  if (!checkbox) return;
+
+  if (checkbox.checked) {
+    draftPartyIDs.add(checkbox.dataset.partyCheck);
+  } else {
+    draftPartyIDs.delete(checkbox.dataset.partyCheck);
+  }
+  renderFriends();
 });
 
 render();
