@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: gameping
+    env: node
+    plan: starter
+    rootDir: GamePing/Server
+    buildCommand: npm run check
+    startCommand: npm run start:prod
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: GAMEPING_DATA_DIR
+        value: /var/data
+      - key: GAMEPING_API_TOKEN
+        sync: false
+    disk:
+      name: gameping-data
+      mountPath: /var/data
+      sizeGB: 1

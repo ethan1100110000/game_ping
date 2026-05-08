@@ -1,0 +1,13 @@
+{
+  "name": "gameping-mock-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check server.mjs && node --check public/app.js && node --check apns.mjs && node --check scripts/deploy-render.mjs",
+    "deploy:render": "node scripts/deploy-render.mjs",
+    "start": "node server.mjs",
+    "start:lan": "HOST=0.0.0.0 node server.mjs",
+    "start:prod": "NODE_ENV=production HOST=0.0.0.0 node server.mjs"
+  }
+}

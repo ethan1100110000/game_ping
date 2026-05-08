@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16875f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="GamePing">
+  <title>GamePing</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css?v=4">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <button class="icon-button" id="profileButton" type="button" aria-label="프로필">내</button>
+      <h1>GamePing</h1>
+      <button class="icon-button" id="addFriendButton" type="button" aria-label="친구 추가">+</button>
+    </header>
+
+    <section class="hero">
+      <div>
+        <p class="eyebrow" id="statusText">서버 확인 중</p>
+        <h2>원터치 호출</h2>
+      </div>
+      <div class="controller-mark" aria-hidden="true">
+        <span></span>
+        <span></span>
+      </div>
+    </section>
+
+    <section class="message-tabs" aria-label="메시지 선택">
+      <button class="selected" type="button" data-message="게임 시작">게임 시작</button>
+      <button type="button" data-message="로비 와">로비 와</button>
+      <button type="button" data-message="디코 와">디코 와</button>
+      <button type="button" data-message="한 판 더">한 판 더</button>
+    </section>
+
+    <button class="party-button" id="partyButton" type="button">
+      <span>파티 호출</span>
+      <strong>보내기</strong>
+    </button>
+
+    <section class="panel">
+      <div class="section-heading">
+        <span class="heading-dot"></span>
+        <h3>받은 호출</h3>
+      </div>
+      <div class="list" id="inboxList"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <span class="heading-dot"></span>
+        <h3>친구</h3>
+      </div>
+      <div class="list" id="friendList"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <span class="heading-dot"></span>
+        <h3>최근 호출</h3>
+      </div>
+      <div class="list" id="recentList"></div>
+    </section>
+  </main>
+
+  <dialog id="profileDialog">
+    <form method="dialog" class="sheet">
+      <div class="sheet-header">
+        <h3>프로필</h3>
+        <button class="text-button" value="cancel" type="submit">닫기</button>
+      </div>
+
+      <label>
+        표시 이름
+        <input id="profileNameInput" autocomplete="nickname">
+      </label>
+
+      <label>
+        내 초대 코드
+        <div class="copy-row">
+          <input id="inviteCodeInput" readonly>
+          <button id="copyInviteButton" type="button">복사</button>
+        </div>
+      </label>
+
+      <label>
+        API 토큰
+        <input id="apiTokenInput" autocomplete="off" placeholder="서버 토큰 사용 시 입력">
+      </label>
+
+      <button class="primary-action" id="saveProfileButton" type="button">저장</button>
+    </form>
+  </dialog>
+
+  <dialog id="friendDialog">
+    <form method="dialog" class="sheet">
+      <div class="sheet-header">
+        <h3>친구 추가</h3>
+        <button class="text-button" value="cancel" type="submit">닫기</button>
+      </div>
+
+      <label>
+        초대 코드
+        <input id="friendCodeInput" autocapitalize="characters" autocomplete="off" placeholder="GP-ABC123">
+      </label>
+
+      <button class="primary-action" id="resolveFriendButton" type="button">코드로 추가</button>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js?v=4" type="module"></script>
+</body>
+</html>
