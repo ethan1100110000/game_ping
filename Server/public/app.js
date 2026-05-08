@@ -174,6 +174,11 @@ async function registerDevice(webPushSubscription = null) {
       inviteCode: state.profile.inviteCode,
       pushToken: `WEB-${state.profile.userID}`,
       webPushSubscription: webPushSubscription?.toJSON?.() ?? webPushSubscription ?? undefined,
+      knownFriends: state.friends.map(friend => ({
+        userID: friend.id,
+        userName: friend.name,
+        inviteCode: friend.handle
+      })),
       platform: "web",
       appVersion: "web"
     })

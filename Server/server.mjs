@@ -183,6 +183,21 @@ function publicInboxPing(record) {
   };
 }
 
+function publicKnownFriend(friend) {
+  const userID = String(friend.userID ?? friend.id ?? "").trim();
+  const inviteCode = normalizeInviteCode(friend.inviteCode ?? friend.handle);
+
+  if (!userID || !inviteCode) {
+    return null;
+  }
+
+  return {
+    userID,
+    userName: String(friend.userName ?? friend.name ?? "친구").trim() || "친구",
+    inviteCode
+  };
+}
+
 function sendJSON(response, statusCode, body) {
   const payload = JSON.stringify(body);
   response.writeHead(statusCode, {
@@ -305,6 +320,46 @@ function friendsForUser(userID) {
     .map(publicFriend);
 }
 
+function restoreKnownFriends(device, knownFriends) {
+  if (!Array.isArray(knownFriends)) {
+    return 0;
+  }
+
+  let restored = 0;
+  for (const item of knownFriends.slice(0, 100)) {
+    const friend = publicKnownFriend(item);
+
+    if (!friend || friend.userID === device.userID || friend.inviteCode === device.inviteCode) {
+      continue;
+    }
+
+    ensureFriendship(device.userID, friend.userID);
+
+    const previous = devices.get(friend.userID);
+    if (!previous) {
+      devices.set(friend.userID, {
+        ...friend,
+        pushToken: null,
+        webPushSubscription: null,
+        platform: "known-contact",
+        appVersion: "known-contact",
+        updatedAt: new Date().toISOString()
+      });
+    } else if (!previous.inviteCode || !previous.userName) {
+      devices.set(friend.userID, {
+        ...previous,
+        userName: previous.userName || friend.userName,
+        inviteCode: previous.inviteCode || friend.inviteCode,
+        updatedAt: previous.updatedAt ?? new Date().toISOString()
+      });
+    }
+
+    restored += 1;
+  }
+
+  return restored;
+}
+
 function findPingTarget(payload) {
   return devices.get(payload.friendID) ?? findDeviceByInviteCode(payload.friendHandle);
 }
@@ -333,6 +388,48 @@ async function notifyFriendRequest(target, record) {
       error: error.body || error.message
     };
   }
+}
+
+async function deliverQueuedPingsForDevice(device) {
+  if (!device?.webPushSubscription || !hasWebPushConfig()) {
+    return 0;
+  }
+
+  const queued = pings
+    .filter(record => record.targetUserID === device.userID)
+    .filter(record => record.status === "queued" && !record.webPush && !record.push)
+    .slice(0, 10);
+
+  let delivered = 0;
+  for (const record of queued) {
+    try {
+      record.webPush = await sendWebPushNotification(device.webPushSubscription, {
+        title: `${record.payload.senderName ?? "GamePing"} 호출`,
+        body: record.payload.notificationBody ?? record.payload.message,
+        pingID: record.id,
+        senderName: record.payload.senderName,
+        message: record.payload.message,
+        url: "/"
+      });
+      if (!record.webPush.skipped) {
+        record.status = "sent";
+        delivered += 1;
+      }
+    } catch (error) {
+      record.webPush = {
+        skipped: false,
+        statusCode: error.statusCode,
+        error: error.body || error.message
+      };
+
+      if (error.statusCode === 404 || error.statusCode === 410) {
+        device.webPushSubscription = null;
+        break;
+      }
+    }
+  }
+
+  return delivered;
 }
 
 const server = createServer(async (request, response) => {
@@ -443,7 +540,7 @@ const server = createServer(async (request, response) => {
       }
 
       const previous = devices.get(payload.userID);
-      devices.set(payload.userID, {
+      const device = {
         userID: String(payload.userID),
         userName: String(payload.userName),
         inviteCode,
@@ -452,13 +549,21 @@ const server = createServer(async (request, response) => {
         platform: payload.platform ?? "ios",
         appVersion: payload.appVersion ?? "dev",
         updatedAt: new Date().toISOString()
-      });
+      };
+      devices.set(device.userID, device);
+      const restoredFriends = restoreKnownFriends(device, payload.knownFriends);
       saveStore();
+      const deliveredQueuedPings = await deliverQueuedPingsForDevice(devices.get(device.userID));
+      if (deliveredQueuedPings > 0) {
+        saveStore();
+      }
 
       sendJSON(response, 202, {
         ok: true,
         status: "registered",
-        device: publicDevice(devices.get(payload.userID))
+        restoredFriends,
+        deliveredQueuedPings,
+        device: publicDevice(devices.get(device.userID))
       });
     } catch (error) {
       sendJSON(response, 400, {
