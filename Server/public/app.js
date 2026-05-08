@@ -13,6 +13,7 @@ let selectedMessage = "게임 시작";
 let toastTimer = null;
 let audioContext = null;
 let serviceWorkerRegistration = null;
+let serverAuthRequired = false;
 
 const els = {
   statusText: document.querySelector("#statusText"),
@@ -135,6 +136,7 @@ async function api(path, options = {}) {
 async function checkHealth() {
   try {
     const health = await api("/health");
+    serverAuthRequired = Boolean(health.authRequired);
     els.statusText.textContent = health.authRequired && !state.apiToken ? "토큰 필요" : "서버 연결됨";
     updatePushUI();
     return health.ok;
@@ -170,7 +172,7 @@ function updatePushUI(message = null) {
     return;
   }
 
-  if (!state.apiToken) {
+  if (serverAuthRequired && !state.apiToken) {
     els.pushStatus.textContent = "토큰 필요";
     els.pushButton.disabled = false;
     els.pushButton.textContent = "토큰 입력";
@@ -220,7 +222,7 @@ async function enablePushNotifications() {
     return;
   }
 
-  if (!state.apiToken) {
+  if (serverAuthRequired && !state.apiToken) {
     toast("토큰 먼저 입력");
     openProfile();
     return;
