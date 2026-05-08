@@ -710,11 +710,12 @@ const server = createServer(async (request, response) => {
       }
 
       const target = findPingTarget(payload);
+      const fallbackTargetUserID = payload.friendID ? String(payload.friendID) : null;
       const record = {
         id: `ping_${randomUUID()}`,
-        status: target ? "queued" : "unresolved",
+        status: target || fallbackTargetUserID ? "queued" : "unresolved",
         receivedAt: new Date().toISOString(),
-        targetUserID: target?.userID ?? null,
+        targetUserID: target?.userID ?? fallbackTargetUserID,
         payload,
         push: null
       };

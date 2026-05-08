@@ -1,5 +1,6 @@
 const STORAGE_KEY = "gameping.web.v1";
 const COLORS = ["#1aa978", "#e23d38", "#eda31d", "#6650b5", "#353a3e"];
+const DEVICE_REFRESH_INTERVAL_MS = 45_000;
 const MESSAGE_BODIES = {
   "게임 시작": "게임 시작했어. 들어와!",
   "로비 와": "로비에서 기다리는 중.",
@@ -14,6 +15,7 @@ let toastTimer = null;
 let audioContext = null;
 let serviceWorkerRegistration = null;
 let serverAuthRequired = false;
+let lastDeviceRegistrationAt = 0;
 let isPartyEditing = false;
 let draftPartyIDs = new Set(state.partyFriendIDs);
 
@@ -178,6 +180,17 @@ async function registerDevice(webPushSubscription = null) {
   });
 }
 
+async function refreshDeviceRegistration({ force = false } = {}) {
+  const now = Date.now();
+  if (!force && now - lastDeviceRegistrationAt < DEVICE_REFRESH_INTERVAL_MS) {
+    return false;
+  }
+
+  await registerDevice(await getExistingPushSubscription());
+  lastDeviceRegistrationAt = Date.now();
+  return true;
+}
+
 function pushSupported() {
   return Boolean("Notification" in window && "serviceWorker" in navigator && "PushManager" in window);
 }
@@ -265,6 +278,7 @@ async function enablePushNotifications() {
     }
 
     await registerDevice(subscription);
+    lastDeviceRegistrationAt = Date.now();
     updatePushUI("알림 등록됨");
     toast("알림 켜짐");
   } catch {
@@ -332,6 +346,32 @@ async function resolveFriend() {
 function normalizeCode(code) {
   const compact = code.replaceAll(" ", "").toUpperCase();
   return compact.startsWith("GP-") ? compact : `GP-${compact}`;
+}
+
+function receiptLabel(status) {
+  switch (status) {
+  case "sent":
+    return "알림 전송됨";
+  case "queued":
+    return "앱 열면 표시";
+  case "unresolved":
+    return "미등록";
+  default:
+    return "전송됨";
+  }
+}
+
+function receiptToast(friend, status) {
+  switch (status) {
+  case "sent":
+    return `${friend.name} 호출 완료`;
+  case "queued":
+    return "상대 앱 열면 표시됨";
+  case "unresolved":
+    return "상대 등록 필요";
+  default:
+    return "호출 저장됨";
+  }
 }
 
 function normalizeFriendPayload(payload) {
@@ -446,6 +486,8 @@ async function pingFriend(friend, shouldToast = true) {
     return false;
   }
 
+  refreshDeviceRegistration().catch(() => {});
+
   state.lastPingAt[friend.id] = Date.now();
   state.recent.unshift({
     id: makeID(),
@@ -471,8 +513,8 @@ async function pingFriend(friend, shouldToast = true) {
         sentAt: new Date().toISOString()
       })
     });
-    state.recent[0].state = receipt.status === "unresolved" ? "미등록" : "전송됨";
-    if (shouldToast) toast(`${friend.name} 호출 완료`);
+    state.recent[0].state = receiptLabel(receipt.status);
+    if (shouldToast) toast(receiptToast(friend, receipt.status));
     return receipt.status !== "unresolved";
   } catch {
     state.recent[0].state = "실패";
@@ -748,7 +790,7 @@ async function saveProfile() {
   saveState();
   render();
   try {
-    await registerDevice(await getExistingPushSubscription());
+    await refreshDeviceRegistration({ force: true });
     await syncFriends();
     await pollFriendRequests({ notify: false });
     await pollInbox({ notify: false });
@@ -851,7 +893,7 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
 }
 
 checkHealth()
-  .then(async () => registerDevice(await getExistingPushSubscription()))
+  .then(() => refreshDeviceRegistration({ force: true }))
   .then(syncFriends)
   .then(() => pollFriendRequests({ notify: false }))
   .then(() => pollInbox({ notify: false }))
@@ -864,6 +906,22 @@ setInterval(() => {
   renderFriends();
 }, 1000);
 setInterval(checkHealth, 10_000);
+setInterval(() => refreshDeviceRegistration().catch(() => {}), DEVICE_REFRESH_INTERVAL_MS);
 setInterval(syncFriends, 10_000);
 setInterval(() => pollFriendRequests({ notify: true }), 4_000);
 setInterval(() => pollInbox({ notify: true }), 3_000);
+
+function resumeApp() {
+  refreshDeviceRegistration({ force: true })
+    .then(syncFriends)
+    .then(() => pollFriendRequests({ notify: false }))
+    .then(() => pollInbox({ notify: false }))
+    .catch(() => {});
+}
+
+window.addEventListener("pageshow", resumeApp);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    resumeApp();
+  }
+});
