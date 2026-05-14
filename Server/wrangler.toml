@@ -1,6 +1,8 @@
 name = "gameping"
 main = "worker.mjs"
 compatibility_date = "2026-05-14"
+workers_dev = true
+preview_urls = false
 
 [assets]
 directory = "./public"
@@ -13,5 +15,5 @@ VAPID_SUBJECT = "mailto:gameping@example.com"
 [[d1_databases]]
 binding = "DB"
 database_name = "gameping-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "360af53f-22bc-480b-bdcf-938d0fb075cc"
 migrations_dir = "./migrations"

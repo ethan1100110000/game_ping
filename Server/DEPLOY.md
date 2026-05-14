@@ -47,6 +47,12 @@ The web app stores the token locally and removes it from the visible URL after o
 
 Cloudflare is the preferred free path for GamePing because Workers do not have Render's 15-minute free-service sleep behavior, and D1 keeps friend/device/ping data outside the server process.
 
+Current deployment:
+
+```text
+https://gameping.ethan1100110000.workers.dev
+```
+
 1. Log in:
 
 ```sh

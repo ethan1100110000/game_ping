@@ -5,7 +5,7 @@ final class AppSettings: ObservableObject {
     static let shared = AppSettings()
     nonisolated static let serverURLKey = "gameping.settings.serverURL"
     nonisolated static let apiTokenKey = "gameping.settings.apiToken"
-    nonisolated static let defaultServerURL = "http://127.0.0.1:8787"
+    nonisolated static let defaultServerURL = "https://gameping.ethan1100110000.workers.dev"
 
     @Published private(set) var serverURLString: String
     @Published private(set) var apiToken: String

@@ -31,29 +31,17 @@ npm run start:lan
 
 Open the printed LAN URL, for example `http://192.168.0.12:8787`, in iPhone Safari. This runs the same one-tap calling flow without installing a signed native app. Keep the page open for received-call polling, sound, and vibration.
 
-## Cloud HTTPS Test
+## Live HTTPS App
 
-For friends outside the same Wi-Fi, deploy `Server` to a cloud host with HTTPS. The server is ready for Render or Docker:
-
-- [Server/DEPLOY.md](/Users/seung-yoon/Documents/Codex/2026-05-08/new-chat/GamePing/Server/DEPLOY.md)
-- [render.yaml](/Users/seung-yoon/Documents/Codex/2026-05-08/new-chat/GamePing/render.yaml)
-- [Server/Dockerfile](/Users/seung-yoon/Documents/Codex/2026-05-08/new-chat/GamePing/Server/Dockerfile)
-
-Use a long `GAMEPING_API_TOKEN` in production. Share the HTTPS link as:
+For friends outside the same Wi-Fi, use the Cloudflare Workers deployment:
 
 ```text
-https://your-gameping-url.example/?token=YOUR_TOKEN
+https://gameping.ethan1100110000.workers.dev
 ```
 
-The web app stores the token locally and removes it from the visible URL after opening.
+Open this link on each phone, add it to the iPhone Home Screen, then tap `알림 켜기`. The current Cloudflare deployment does not require an API token.
 
-The current Render deployment URL is:
-
-```text
-https://gameping.onrender.com
-```
-
-Open the first shared link with the production token once on each phone, then tap `알림 켜기`. On iPhone, Safari Web Push works best after adding GamePing to the Home Screen.
+Deployment notes are in [Server/DEPLOY.md](/Users/seung-yoon/Documents/Codex/2026-05-08/new-chat/GamePing/Server/DEPLOY.md).
 
 The app posts ping requests to the configured server URL. If the server is unavailable, the app still records the ping and shows a local notification preview.
 
@@ -75,7 +63,7 @@ Useful endpoints:
 Friend lookup:
 
 ```sh
-curl http://127.0.0.1:8787/invites/GP-ABC123
+curl https://gameping.ethan1100110000.workers.dev/invites/GP-ABC123
 ```
 
 APNs environment variables:
