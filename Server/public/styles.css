@@ -410,7 +410,8 @@ button {
 }
 
 .accept-button,
-.reject-button {
+.reject-button,
+.ack-button {
   min-width: 0;
   height: 38px;
   border-radius: 8px;
@@ -419,6 +420,13 @@ button {
 }
 
 .accept-button {
+  color: #07100c;
+  background: var(--green);
+}
+
+.ack-button {
+  min-width: 56px;
+  padding: 0 10px;
   color: #07100c;
   background: var(--green);
 }

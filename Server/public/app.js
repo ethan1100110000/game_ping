@@ -386,6 +386,8 @@ function normalizeCode(code) {
 
 function receiptLabel(status) {
   switch (status) {
+  case "acknowledged":
+    return "확인함";
   case "sent":
     return "알림 전송됨";
   case "queued":
@@ -399,6 +401,8 @@ function receiptLabel(status) {
 
 function receiptToast(friend, status) {
   switch (status) {
+  case "acknowledged":
+    return `${friend.name} 확인함`;
   case "sent":
     return `${friend.name} 호출 완료`;
   case "queued":
@@ -541,7 +545,9 @@ async function pingFriend(friend, shouldToast = true) {
     const receipt = await apiWithRetry("/pings", {
       method: "POST",
       body: JSON.stringify({
+        senderID: state.profile.userID,
         senderName: state.profile.userName,
+        senderInviteCode: state.profile.inviteCode,
         friendID: friend.id,
         friendName: friend.name,
         friendHandle: friend.handle,
@@ -551,11 +557,18 @@ async function pingFriend(friend, shouldToast = true) {
         sentAt: new Date().toISOString()
       })
     }, { attempts: 3, delayMs: 1_200 });
-    state.recent[0].state = receiptLabel(receipt.status);
+    const recent = state.recent.find(item => item.id === clientPingID);
+    if (recent) {
+      recent.serverPingID = receipt.id;
+      recent.state = receiptLabel(receipt.status);
+    }
     if (shouldToast) toast(receiptToast(friend, receipt.status));
     return receipt.status !== "unresolved";
   } catch {
-    state.recent[0].state = "실패";
+    const recent = state.recent.find(item => item.id === clientPingID);
+    if (recent) {
+      recent.state = "실패";
+    }
     if (shouldToast) toast("전송 실패");
     return false;
   } finally {
@@ -609,15 +622,40 @@ async function pollInbox({ notify = true } = {}) {
   try {
     const payload = await api(`/inbox/${encodeURIComponent(state.profile.userID)}`);
     const knownIDs = new Set(state.inbox.map(ping => ping.id));
-    const incoming = payload.pings.filter(ping => !knownIDs.has(ping.id));
+    const incoming = [];
+    let changed = false;
+
+    for (const ping of payload.pings ?? []) {
+      const existingIndex = state.inbox.findIndex(item => item.id === ping.id);
+      if (existingIndex >= 0) {
+        if (state.inbox[existingIndex].acknowledgedAt !== ping.acknowledgedAt) {
+          state.inbox[existingIndex] = {
+            ...state.inbox[existingIndex],
+            ...ping
+          };
+          changed = true;
+        }
+        continue;
+      }
+
+      if (!knownIDs.has(ping.id)) {
+        incoming.push(ping);
+      }
+    }
 
     if (incoming.length > 0) {
       state.inbox = [...incoming, ...state.inbox]
         .sort((a, b) => Date.parse(b.receivedAt) - Date.parse(a.receivedAt))
         .slice(0, 20);
+      changed = true;
+    }
+
+    if (changed) {
       saveState();
       render();
+    }
 
+    if (incoming.length > 0) {
       if (notify) {
         playPingSound();
         navigator.vibrate?.([120, 60, 120]);
@@ -628,6 +666,70 @@ async function pollInbox({ notify = true } = {}) {
     if (state.apiToken) {
       els.statusText.textContent = "토큰 확인 필요";
     }
+  }
+}
+
+async function acknowledgeInboxPing(pingID) {
+  const ping = state.inbox.find(item => item.id === pingID);
+  if (!ping || ping.acknowledgedAt) return;
+
+  try {
+    const payload = await api(`/pings/${encodeURIComponent(ping.id)}/ack`, {
+      method: "POST",
+      body: JSON.stringify({
+        ackToken: ping.ackToken,
+        userID: state.profile.userID,
+        userName: state.profile.userName
+      })
+    });
+    ping.acknowledgedAt = payload.acknowledgedAt;
+    saveState();
+    renderInbox();
+    toast("확인 보냄");
+  } catch {
+    toast("확인 실패");
+  }
+}
+
+async function pollSentPings({ notify = true } = {}) {
+  try {
+    const payload = await api(`/sent/${encodeURIComponent(state.profile.userID)}`);
+    let changed = false;
+    let newestAck = null;
+
+    for (const ping of payload.pings ?? []) {
+      const recent = state.recent.find(item =>
+        item.serverPingID === ping.id || item.id === ping.clientPingID
+      );
+      if (!recent) continue;
+
+      if (ping.id && recent.serverPingID !== ping.id) {
+        recent.serverPingID = ping.id;
+        changed = true;
+      }
+
+      if (ping.acknowledgedAt && recent.acknowledgedAt !== ping.acknowledgedAt) {
+        recent.state = "확인함";
+        recent.acknowledgedAt = ping.acknowledgedAt;
+        recent.acknowledgedByName = ping.acknowledgedByName;
+        newestAck ??= recent;
+        changed = true;
+      } else if (!recent.acknowledgedAt && ping.status && recent.state !== receiptLabel(ping.status)) {
+        recent.state = receiptLabel(ping.status);
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      saveState();
+      renderRecent();
+    }
+
+    if (notify && newestAck) {
+      toast(`${newestAck.friendName} 확인함`);
+    }
+  } catch {
+    // Sent status polling is best-effort.
   }
 }
 
@@ -770,9 +872,15 @@ function renderInbox() {
       <div class="mini-mark">알림</div>
       <div>
         <div class="row-title">${escapeHTML(ping.senderName)} <span class="row-subtitle">${escapeHTML(ping.message)}</span></div>
-        <div class="row-subtitle">${escapeHTML(ping.body)}</div>
+        <div class="row-subtitle">${escapeHTML(ping.body)}${ping.acknowledgedAt ? " · 확인함" : ""}</div>
       </div>
-      <div class="time-text">${timeLabel(ping.receivedAt)}</div>
+      ${ping.acknowledgedAt ? `
+        <div class="time-text">${timeLabel(ping.acknowledgedAt)}</div>
+      ` : ping.ackToken ? `
+        <button class="ack-button" data-ack-ping="${escapeHTML(ping.id)}" type="button">확인</button>
+      ` : `
+        <div class="time-text">${timeLabel(ping.receivedAt)}</div>
+      `}
     </article>
   `).join("");
 }
@@ -788,7 +896,7 @@ function renderRecent() {
       <div class="mini-mark">전송</div>
       <div>
         <div class="row-title">${escapeHTML(ping.friendName)}</div>
-        <div class="row-subtitle">${escapeHTML(ping.message)} · ${escapeHTML(ping.state)}</div>
+        <div class="row-subtitle">${escapeHTML(ping.message)} · ${escapeHTML(ping.state)}${ping.acknowledgedAt ? ` · ${timeLabel(ping.acknowledgedAt)}` : ""}</div>
       </div>
       <div class="time-text">${timeLabel(ping.sentAt)}</div>
     </article>
@@ -915,6 +1023,12 @@ els.friendRequestList.addEventListener("click", event => {
   respondFriendRequest(button.dataset.requestId, button.dataset.requestAction);
 });
 
+els.inboxList.addEventListener("click", event => {
+  const button = event.target.closest("[data-ack-ping]");
+  if (!button) return;
+  acknowledgeInboxPing(button.dataset.ackPing);
+});
+
 render();
 updatePushUI();
 
@@ -928,6 +1042,15 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
     .catch(() => {
       updatePushUI("알림 준비 실패");
     });
+
+  navigator.serviceWorker.addEventListener("message", event => {
+    if (event.data?.type !== "ping-acknowledged") return;
+    const ping = state.inbox.find(item => item.id === event.data.pingID);
+    if (!ping) return;
+    ping.acknowledgedAt = event.data.acknowledgedAt ?? new Date().toISOString();
+    saveState();
+    renderInbox();
+  });
 }
 
 checkHealth()
@@ -935,6 +1058,7 @@ checkHealth()
   .then(syncFriends)
   .then(() => pollFriendRequests({ notify: false }))
   .then(() => pollInbox({ notify: false }))
+  .then(() => pollSentPings({ notify: false }))
   .then(updatePushUI)
   .catch(() => {
     els.statusText.textContent = "서버 연결 실패";
@@ -948,12 +1072,14 @@ setInterval(() => refreshDeviceRegistration().catch(() => {}), DEVICE_REFRESH_IN
 setInterval(syncFriends, 10_000);
 setInterval(() => pollFriendRequests({ notify: true }), 4_000);
 setInterval(() => pollInbox({ notify: true }), 3_000);
+setInterval(() => pollSentPings({ notify: true }), 4_000);
 
 function resumeApp() {
   refreshDeviceRegistration({ force: true })
     .then(syncFriends)
     .then(() => pollFriendRequests({ notify: false }))
     .then(() => pollInbox({ notify: false }))
+    .then(() => pollSentPings({ notify: false }))
     .catch(() => {});
 }
 

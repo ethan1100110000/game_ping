@@ -1,7 +1,9 @@
 import Foundation
 
 struct PingDeliveryPayload: Codable, Equatable {
+    var senderID: String
     var senderName: String
+    var senderInviteCode: String
     var friendID: String
     var friendName: String
     var friendHandle: String
@@ -108,10 +110,12 @@ final class PingDeliveryClient {
     func send(
         event: PingEvent,
         to friend: PingFriend,
-        senderName: String
+        senderProfile: UserProfile
     ) async -> Result<PingDeliveryReceipt, PingDeliveryError> {
         let payload = PingDeliveryPayload(
-            senderName: senderName,
+            senderID: senderProfile.id.uuidString,
+            senderName: senderProfile.displayName,
+            senderInviteCode: senderProfile.inviteCode,
             friendID: friend.id.uuidString,
             friendName: friend.name,
             friendHandle: friend.handle,

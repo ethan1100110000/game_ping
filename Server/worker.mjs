@@ -13,6 +13,7 @@ const API_PREFIXES = [
   "/friends/",
   "/friend-requests",
   "/pings",
+  "/sent/",
   "/inbox/"
 ];
 
@@ -196,6 +197,21 @@ async function routeAPI(request, env, ctx, url) {
     });
   }
 
+  if (request.method === "GET" && url.pathname.startsWith("/sent/")) {
+    const userID = decodeURIComponent(url.pathname.replace("/sent/", ""));
+    const rows = await env.DB.prepare(`
+      SELECT * FROM pings
+      WHERE json_extract(payload, '$.senderID') = ?
+      ORDER BY received_at DESC
+      LIMIT 20
+    `).bind(userID).all();
+
+    return jsonResponse({
+      ok: true,
+      pings: rows.results.map(pingFromRow).map(publicSentPing)
+    });
+  }
+
   if (request.method === "GET" && url.pathname.startsWith("/inbox/")) {
     const userID = decodeURIComponent(url.pathname.replace("/inbox/", ""));
     const since = Date.parse(url.searchParams.get("since") ?? "");
@@ -221,6 +237,10 @@ async function routeAPI(request, env, ctx, url) {
 
   if (request.method === "POST" && url.pathname === "/pings") {
     return createPing(request, env);
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/pings/") && url.pathname.endsWith("/ack")) {
+    return acknowledgePing(request, env, url);
   }
 
   return null;
@@ -405,24 +425,22 @@ async function createPing(request, env) {
   const record = {
     id: `ping_${crypto.randomUUID()}`,
     clientPingID,
+    ackToken: `ack_${crypto.randomUUID()}`,
     status: target || fallbackTargetUserID ? "queued" : "unresolved",
     receivedAt: new Date().toISOString(),
     targetUserID: target?.userID ?? fallbackTargetUserID,
     payload,
     webPush: null,
-    push: null
+    push: null,
+    acknowledgedAt: null,
+    acknowledgedByID: null,
+    acknowledgedByName: null,
+    ackPush: null
   };
 
   if (target?.webPushSubscription) {
     try {
-      record.webPush = await sendWebPushNotification(env, target.webPushSubscription, {
-        title: `${payload.senderName ?? "GamePing"} 호출`,
-        body: payload.notificationBody ?? payload.message,
-        pingID: record.id,
-        senderName: payload.senderName,
-        message: payload.message,
-        url: "/"
-      });
+      record.webPush = await sendWebPushNotification(env, target.webPushSubscription, pingNotificationPayload(record, target));
       if (!record.webPush.skipped) {
         record.status = "sent";
       }
@@ -451,6 +469,51 @@ async function createPing(request, env) {
   }, 202);
 }
 
+async function acknowledgePing(request, env, url) {
+  const pingID = decodeURIComponent(url.pathname.slice("/pings/".length, -"/ack".length));
+  const payload = await readJSON(request);
+  const record = await getPing(env, pingID);
+
+  if (!record) {
+    return jsonResponse({
+      ok: false,
+      error: "Ping not found"
+    }, 404);
+  }
+
+  if (!record.ackToken || payload.ackToken !== record.ackToken) {
+    return jsonResponse({
+      ok: false,
+      error: "Invalid acknowledgement token"
+    }, 403);
+  }
+
+  const userID = String(payload.userID ?? record.targetUserID ?? "").trim();
+  if (record.targetUserID && userID && userID !== record.targetUserID) {
+    return jsonResponse({
+      ok: false,
+      error: "Only the target user can acknowledge this ping"
+    }, 403);
+  }
+
+  if (!record.acknowledgedAt) {
+    record.status = "acknowledged";
+    record.acknowledgedAt = new Date().toISOString();
+    record.acknowledgedByID = userID || record.targetUserID;
+    record.acknowledgedByName = String(payload.userName ?? record.payload.friendName ?? "친구").trim() || "친구";
+    record.ackPush = await notifyPingAcknowledgement(env, record);
+    await updatePingAcknowledgement(env, record);
+  }
+
+  return jsonResponse({
+    ok: true,
+    status: record.status,
+    pingID: record.id,
+    acknowledgedAt: record.acknowledgedAt,
+    acknowledgedByName: record.acknowledgedByName
+  });
+}
+
 function isAPIRoute(pathname) {
   return API_PREFIXES.some(prefix => pathname === prefix || pathname.startsWith(prefix));
 }
@@ -461,6 +524,10 @@ function isProtectedRoute(method, pathname, env) {
   }
 
   if (pathname === "/health" || pathname.startsWith("/invites/")) {
+    return false;
+  }
+
+  if (pathname.startsWith("/pings/") && pathname.endsWith("/ack")) {
     return false;
   }
 
@@ -552,7 +619,22 @@ function publicInboxPing(record) {
     receivedAt: record.receivedAt,
     senderName: record.payload.senderName ?? "GamePing",
     message: record.payload.message ?? "호출",
-    body: record.payload.notificationBody ?? record.payload.message ?? "게임 시작했어. 들어와!"
+    body: record.payload.notificationBody ?? record.payload.message ?? "게임 시작했어. 들어와!",
+    acknowledgedAt: record.acknowledgedAt ?? null,
+    ackToken: record.ackToken
+  };
+}
+
+function publicSentPing(record) {
+  return {
+    id: record.id,
+    clientPingID: record.clientPingID,
+    status: record.status,
+    receivedAt: record.receivedAt,
+    friendName: record.payload.friendName ?? "친구",
+    message: record.payload.message ?? "호출",
+    acknowledgedAt: record.acknowledgedAt ?? null,
+    acknowledgedByName: record.acknowledgedByName ?? null
   };
 }
 
@@ -616,12 +698,17 @@ function pingFromRow(row) {
   return {
     id: row.id,
     clientPingID: row.client_ping_id,
+    ackToken: row.ack_token,
     status: row.status,
     receivedAt: row.received_at,
     targetUserID: row.target_user_id,
     payload: parseJSON(row.payload) ?? {},
     webPush: parseJSON(row.web_push),
-    push: parseJSON(row.push)
+    push: parseJSON(row.push),
+    acknowledgedAt: row.acknowledged_at,
+    acknowledgedByID: row.acknowledged_by_id,
+    acknowledgedByName: row.acknowledged_by_name,
+    ackPush: parseJSON(row.ack_push)
   };
 }
 
@@ -643,6 +730,13 @@ async function getDevice(env, userID) {
     .bind(String(userID))
     .first();
   return deviceFromRow(row);
+}
+
+async function getPing(env, pingID) {
+  const row = await env.DB.prepare("SELECT * FROM pings WHERE id = ? LIMIT 1")
+    .bind(String(pingID))
+    .first();
+  return pingFromRow(row);
 }
 
 async function findDeviceByInviteCode(env, code) {
@@ -836,18 +930,24 @@ async function updateFriendRequestPush(env, id, push) {
 async function insertPing(env, record) {
   await env.DB.prepare(`
     INSERT INTO pings (
-      id, client_ping_id, status, received_at, target_user_id, payload, web_push, push
+      id, client_ping_id, ack_token, status, received_at, target_user_id, payload,
+      web_push, push, acknowledged_at, acknowledged_by_id, acknowledged_by_name, ack_push
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     record.id,
     record.clientPingID,
+    record.ackToken,
     record.status,
     record.receivedAt,
     record.targetUserID,
     stringifyJSON(record.payload),
     stringifyJSON(record.webPush),
-    stringifyJSON(record.push)
+    stringifyJSON(record.push),
+    record.acknowledgedAt,
+    record.acknowledgedByID,
+    record.acknowledgedByName,
+    stringifyJSON(record.ackPush)
   ).run();
 }
 
@@ -857,6 +957,21 @@ async function updatePingDelivery(env, record) {
     SET status = ?, web_push = ?, push = ?
     WHERE id = ?
   `).bind(record.status, stringifyJSON(record.webPush), stringifyJSON(record.push), record.id).run();
+}
+
+async function updatePingAcknowledgement(env, record) {
+  await env.DB.prepare(`
+    UPDATE pings
+    SET status = ?, acknowledged_at = ?, acknowledged_by_id = ?, acknowledged_by_name = ?, ack_push = ?
+    WHERE id = ?
+  `).bind(
+    record.status,
+    record.acknowledgedAt,
+    record.acknowledgedByID,
+    record.acknowledgedByName,
+    stringifyJSON(record.ackPush),
+    record.id
+  ).run();
 }
 
 async function clearWebPushSubscription(env, userID) {
@@ -906,6 +1021,55 @@ async function notifyFriendRequest(env, target, record) {
   }
 }
 
+function pingNotificationPayload(record, target) {
+  return {
+    kind: "ping",
+    title: `${record.payload.senderName ?? "GamePing"} 호출`,
+    body: record.payload.notificationBody ?? record.payload.message,
+    pingID: record.id,
+    ackToken: record.ackToken,
+    targetUserID: target.userID,
+    targetName: target.userName,
+    senderName: record.payload.senderName,
+    message: record.payload.message,
+    url: "/"
+  };
+}
+
+async function notifyPingAcknowledgement(env, record) {
+  const senderID = String(record.payload.senderID ?? "").trim();
+  if (!senderID || !hasWebPushConfig(env)) {
+    return null;
+  }
+
+  const sender = await getDevice(env, senderID);
+  if (!sender?.webPushSubscription) {
+    return null;
+  }
+
+  try {
+    return await sendWebPushNotification(env, sender.webPushSubscription, {
+      kind: "ack",
+      title: "GamePing 확인",
+      body: `${record.acknowledgedByName ?? "친구"}님이 호출을 확인했어.`,
+      pingID: record.id,
+      acknowledgedAt: record.acknowledgedAt,
+      acknowledgedByName: record.acknowledgedByName,
+      url: "/"
+    });
+  } catch (error) {
+    if (error.statusCode === 404 || error.statusCode === 410) {
+      await clearWebPushSubscription(env, sender.userID);
+    }
+
+    return {
+      skipped: false,
+      statusCode: error.statusCode,
+      error: error.body || error.message
+    };
+  }
+}
+
 async function deliverQueuedPingsForDevice(env, device) {
   if (!device?.webPushSubscription || !hasWebPushConfig(env)) {
     return 0;
@@ -922,14 +1086,7 @@ async function deliverQueuedPingsForDevice(env, device) {
   for (const row of rows.results) {
     const record = pingFromRow(row);
     try {
-      record.webPush = await sendWebPushNotification(env, device.webPushSubscription, {
-        title: `${record.payload.senderName ?? "GamePing"} 호출`,
-        body: record.payload.notificationBody ?? record.payload.message,
-        pingID: record.id,
-        senderName: record.payload.senderName,
-        message: record.payload.message,
-        url: "/"
-      });
+      record.webPush = await sendWebPushNotification(env, device.webPushSubscription, pingNotificationPayload(record, device));
       if (!record.webPush.skipped) {
         record.status = "sent";
         delivered += 1;

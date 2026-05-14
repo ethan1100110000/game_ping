@@ -106,6 +106,10 @@ function isProtectedRoute(method, pathname) {
     return false;
   }
 
+  if (pathname.startsWith("/pings/") && pathname.endsWith("/ack")) {
+    return false;
+  }
+
   return method !== "OPTIONS";
 }
 
@@ -179,7 +183,22 @@ function publicInboxPing(record) {
     receivedAt: record.receivedAt,
     senderName: record.payload.senderName ?? "GamePing",
     message: record.payload.message ?? "호출",
-    body: record.payload.notificationBody ?? record.payload.message ?? "게임 시작했어. 들어와!"
+    body: record.payload.notificationBody ?? record.payload.message ?? "게임 시작했어. 들어와!",
+    acknowledgedAt: record.acknowledgedAt ?? null,
+    ackToken: record.ackToken
+  };
+}
+
+function publicSentPing(record) {
+  return {
+    id: record.id,
+    clientPingID: record.payload.clientPingID ?? record.clientPingID ?? null,
+    status: record.status,
+    receivedAt: record.receivedAt,
+    friendName: record.payload.friendName ?? "친구",
+    message: record.payload.message ?? "호출",
+    acknowledgedAt: record.acknowledgedAt ?? null,
+    acknowledgedByName: record.acknowledgedByName ?? null
   };
 }
 
@@ -390,6 +409,55 @@ async function notifyFriendRequest(target, record) {
   }
 }
 
+function pingNotificationPayload(record, target) {
+  return {
+    kind: "ping",
+    title: `${record.payload.senderName ?? "GamePing"} 호출`,
+    body: record.payload.notificationBody ?? record.payload.message,
+    pingID: record.id,
+    ackToken: record.ackToken,
+    targetUserID: target.userID,
+    targetName: target.userName,
+    senderName: record.payload.senderName,
+    message: record.payload.message,
+    url: "/"
+  };
+}
+
+async function notifyPingAcknowledgement(record) {
+  const senderID = String(record.payload.senderID ?? "").trim();
+  if (!senderID || !hasWebPushConfig()) {
+    return null;
+  }
+
+  const sender = devices.get(senderID);
+  if (!sender?.webPushSubscription) {
+    return null;
+  }
+
+  try {
+    return await sendWebPushNotification(sender.webPushSubscription, {
+      kind: "ack",
+      title: "GamePing 확인",
+      body: `${record.acknowledgedByName ?? "친구"}님이 호출을 확인했어.`,
+      pingID: record.id,
+      acknowledgedAt: record.acknowledgedAt,
+      acknowledgedByName: record.acknowledgedByName,
+      url: "/"
+    });
+  } catch (error) {
+    if (error.statusCode === 404 || error.statusCode === 410) {
+      sender.webPushSubscription = null;
+    }
+
+    return {
+      skipped: false,
+      statusCode: error.statusCode,
+      error: error.body || error.message
+    };
+  }
+}
+
 async function deliverQueuedPingsForDevice(device) {
   if (!device?.webPushSubscription || !hasWebPushConfig()) {
     return 0;
@@ -403,14 +471,7 @@ async function deliverQueuedPingsForDevice(device) {
   let delivered = 0;
   for (const record of queued) {
     try {
-      record.webPush = await sendWebPushNotification(device.webPushSubscription, {
-        title: `${record.payload.senderName ?? "GamePing"} 호출`,
-        body: record.payload.notificationBody ?? record.payload.message,
-        pingID: record.id,
-        senderName: record.payload.senderName,
-        message: record.payload.message,
-        url: "/"
-      });
+      record.webPush = await sendWebPushNotification(device.webPushSubscription, pingNotificationPayload(record, device));
       if (!record.webPush.skipped) {
         record.status = "sent";
         delivered += 1;
@@ -785,6 +846,20 @@ const server = createServer(async (request, response) => {
     return;
   }
 
+  if (request.method === "GET" && url.pathname.startsWith("/sent/")) {
+    const userID = decodeURIComponent(url.pathname.replace("/sent/", ""));
+    const sent = pings
+      .filter(record => record.payload.senderID === userID)
+      .slice(0, 20)
+      .map(publicSentPing);
+
+    sendJSON(response, 200, {
+      ok: true,
+      pings: sent
+    });
+    return;
+  }
+
   if (request.method === "GET" && url.pathname.startsWith("/inbox/")) {
     const userID = decodeURIComponent(url.pathname.replace("/inbox/", ""));
     const since = Date.parse(url.searchParams.get("since") ?? "");
@@ -832,23 +907,22 @@ const server = createServer(async (request, response) => {
       const fallbackTargetUserID = payload.friendID ? String(payload.friendID) : null;
       const record = {
         id: `ping_${randomUUID()}`,
+        ackToken: `ack_${randomUUID()}`,
         status: target || fallbackTargetUserID ? "queued" : "unresolved",
         receivedAt: new Date().toISOString(),
         targetUserID: target?.userID ?? fallbackTargetUserID,
         payload,
-        push: null
+        webPush: null,
+        push: null,
+        acknowledgedAt: null,
+        acknowledgedByID: null,
+        acknowledgedByName: null,
+        ackPush: null
       };
 
       if (target?.webPushSubscription) {
         try {
-          record.webPush = await sendWebPushNotification(target.webPushSubscription, {
-            title: `${payload.senderName ?? "GamePing"} 호출`,
-            body: payload.notificationBody ?? payload.message,
-            pingID: record.id,
-            senderName: payload.senderName,
-            message: payload.message,
-            url: "/"
-          });
+          record.webPush = await sendWebPushNotification(target.webPushSubscription, pingNotificationPayload(record, target));
           if (!record.webPush.skipped) {
             record.status = "sent";
           }
@@ -903,6 +977,62 @@ const server = createServer(async (request, response) => {
         id: record.id,
         status: record.status,
         receivedAt: record.receivedAt
+      });
+    } catch (error) {
+      sendJSON(response, 400, {
+        ok: false,
+        error: error.message
+      });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname.startsWith("/pings/") && url.pathname.endsWith("/ack")) {
+    try {
+      const pingID = decodeURIComponent(url.pathname.slice("/pings/".length, -"/ack".length));
+      const payload = await readJSON(request);
+      const record = pings.find(item => item.id === pingID);
+
+      if (!record) {
+        sendJSON(response, 404, {
+          ok: false,
+          error: "Ping not found"
+        });
+        return;
+      }
+
+      if (!record.ackToken || payload.ackToken !== record.ackToken) {
+        sendJSON(response, 403, {
+          ok: false,
+          error: "Invalid acknowledgement token"
+        });
+        return;
+      }
+
+      const userID = String(payload.userID ?? record.targetUserID ?? "").trim();
+      if (record.targetUserID && userID && userID !== record.targetUserID) {
+        sendJSON(response, 403, {
+          ok: false,
+          error: "Only the target user can acknowledge this ping"
+        });
+        return;
+      }
+
+      if (!record.acknowledgedAt) {
+        record.status = "acknowledged";
+        record.acknowledgedAt = new Date().toISOString();
+        record.acknowledgedByID = userID || record.targetUserID;
+        record.acknowledgedByName = String(payload.userName ?? record.payload.friendName ?? "친구").trim() || "친구";
+        record.ackPush = await notifyPingAcknowledgement(record);
+        saveStore();
+      }
+
+      sendJSON(response, 200, {
+        ok: true,
+        status: record.status,
+        pingID: record.id,
+        acknowledgedAt: record.acknowledgedAt,
+        acknowledgedByName: record.acknowledgedByName
       });
     } catch (error) {
       sendJSON(response, 400, {

@@ -157,7 +157,7 @@ struct ContentView: View {
         let result = await PingDeliveryClient.shared.send(
             event: event,
             to: friend,
-            senderName: store.profile.displayName
+            senderProfile: store.profile
         )
         await NotificationManager.shared.schedulePingPreview(to: event.friendName, message: event.message)
 
