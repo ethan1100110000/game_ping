@@ -1,4 +1,4 @@
-const CACHE_NAME = "gameping-web-v8";
+const CACHE_NAME = "gameping-web-v9";
 const APP_SHELL = [
   "/",
   "/styles.css",

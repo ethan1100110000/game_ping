@@ -363,7 +363,7 @@ private struct FriendRow: View {
     private func secondsLeft(at date: Date) -> Int {
         guard let lastPingAt = friend.lastPingAt else { return 0 }
         let elapsed = date.timeIntervalSince(lastPingAt)
-        return max(0, Int(ceil(30 - elapsed)))
+        return max(0, Int(ceil(5 - elapsed)))
     }
 
     private func rowBody(secondsLeft: Int) -> some View {

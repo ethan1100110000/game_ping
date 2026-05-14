@@ -11,7 +11,7 @@ final class PingStore: ObservableObject {
     private let friendsKey = "gameping.friends"
     private let eventsKey = "gameping.events"
     private let receivedPingsKey = "gameping.receivedPings"
-    private let cooldown: TimeInterval = 30
+    private let cooldown: TimeInterval = 5
 
     init() {
         load()

@@ -814,6 +814,20 @@ const server = createServer(async (request, response) => {
         return;
       }
 
+      if (payload.clientPingID) {
+        const existing = pings.find(record => record.payload.clientPingID === String(payload.clientPingID));
+        if (existing) {
+          sendJSON(response, 202, {
+            ok: true,
+            id: existing.id,
+            status: existing.status,
+            receivedAt: existing.receivedAt,
+            duplicate: true
+          });
+          return;
+        }
+      }
+
       const target = findPingTarget(payload);
       const fallbackTargetUserID = payload.friendID ? String(payload.friendID) : null;
       const record = {

@@ -5,6 +5,7 @@ struct PingDeliveryPayload: Codable, Equatable {
     var friendID: String
     var friendName: String
     var friendHandle: String
+    var clientPingID: String
     var message: String
     var notificationBody: String
     var sentAt: Date
@@ -114,6 +115,7 @@ final class PingDeliveryClient {
             friendID: friend.id.uuidString,
             friendName: friend.name,
             friendHandle: friend.handle,
+            clientPingID: event.id.uuidString,
             message: event.message.rawValue,
             notificationBody: event.message.notificationBody,
             sentAt: event.sentAt
@@ -126,7 +128,7 @@ final class PingDeliveryClient {
 
             var request = makeRequest(url: url)
             request.httpMethod = "POST"
-            request.timeoutInterval = 1.5
+            request.timeoutInterval = 20
             request.httpBody = try makeEncoder().encode(payload)
 
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -155,7 +157,7 @@ final class PingDeliveryClient {
 
             var request = makeRequest(url: url)
             request.httpMethod = "GET"
-            request.timeoutInterval = 1
+            request.timeoutInterval = 8
 
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
@@ -190,7 +192,7 @@ final class PingDeliveryClient {
 
             var request = makeRequest(url: url)
             request.httpMethod = "POST"
-            request.timeoutInterval = 1.5
+            request.timeoutInterval = 20
             request.httpBody = try JSONEncoder().encode(payload)
 
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -221,7 +223,7 @@ final class PingDeliveryClient {
         do {
             var request = makeRequest(url: url)
             request.httpMethod = "GET"
-            request.timeoutInterval = 1.5
+            request.timeoutInterval = 12
 
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {
@@ -258,7 +260,7 @@ final class PingDeliveryClient {
         do {
             var request = makeRequest(url: url)
             request.httpMethod = "GET"
-            request.timeoutInterval = 1.5
+            request.timeoutInterval = 12
 
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else {

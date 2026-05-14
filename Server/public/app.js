@@ -1,6 +1,8 @@
 const STORAGE_KEY = "gameping.web.v1";
 const COLORS = ["#1aa978", "#e23d38", "#eda31d", "#6650b5", "#353a3e"];
 const DEVICE_REFRESH_INTERVAL_MS = 45_000;
+const PING_COOLDOWN_MS = 5_000;
+const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const MESSAGE_BODIES = {
   "게임 시작": "게임 시작했어. 들어와!",
   "로비 와": "로비에서 기다리는 중.",
@@ -147,14 +149,43 @@ async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.error ?? `HTTP ${response.status}`);
+    const error = new Error(payload.error ?? `HTTP ${response.status}`);
+    error.status = response.status;
+    error.retryable = RETRYABLE_STATUS_CODES.has(response.status);
+    throw error;
   }
   return payload;
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isRetryableError(error) {
+  return error?.retryable === true || error instanceof TypeError;
+}
+
+async function apiWithRetry(path, options = {}, { attempts = 3, delayMs = 900 } = {}) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await api(path, options);
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableError(error) || attempt === attempts - 1) {
+        throw error;
+      }
+      await sleep(delayMs * (attempt + 1));
+    }
+  }
+
+  throw lastError;
+}
+
 async function checkHealth() {
   try {
-    const health = await api("/health");
+    const health = await apiWithRetry("/health", {}, { attempts: 2, delayMs: 800 });
     serverAuthRequired = Boolean(health.authRequired);
     els.statusText.textContent = health.authRequired && !state.apiToken ? "토큰 필요" : "서버 연결됨";
     updatePushUI();
@@ -166,7 +197,7 @@ async function checkHealth() {
 }
 
 async function registerDevice(webPushSubscription = null) {
-  await api("/devices", {
+  await apiWithRetry("/devices", {
     method: "POST",
     body: JSON.stringify({
       userID: state.profile.userID,
@@ -182,7 +213,7 @@ async function registerDevice(webPushSubscription = null) {
       platform: "web",
       appVersion: "web"
     })
-  });
+  }, { attempts: 3, delayMs: 900 });
 }
 
 async function refreshDeviceRegistration({ force = false } = {}) {
@@ -493,9 +524,10 @@ async function pingFriend(friend, shouldToast = true) {
 
   refreshDeviceRegistration().catch(() => {});
 
+  const clientPingID = makeID();
   state.lastPingAt[friend.id] = Date.now();
   state.recent.unshift({
-    id: makeID(),
+    id: clientPingID,
     friendName: friend.name,
     message: selectedMessage,
     sentAt: new Date().toISOString(),
@@ -506,18 +538,19 @@ async function pingFriend(friend, shouldToast = true) {
   render();
 
   try {
-    const receipt = await api("/pings", {
+    const receipt = await apiWithRetry("/pings", {
       method: "POST",
       body: JSON.stringify({
         senderName: state.profile.userName,
         friendID: friend.id,
         friendName: friend.name,
         friendHandle: friend.handle,
+        clientPingID,
         message: selectedMessage,
         notificationBody: MESSAGE_BODIES[selectedMessage],
         sentAt: new Date().toISOString()
       })
-    });
+    }, { attempts: 3, delayMs: 1_200 });
     state.recent[0].state = receiptLabel(receipt.status);
     if (shouldToast) toast(receiptToast(friend, receipt.status));
     return receipt.status !== "unresolved";
@@ -601,7 +634,7 @@ async function pollInbox({ notify = true } = {}) {
 function cooldownSeconds(friendID) {
   const last = state.lastPingAt[friendID];
   if (!last) return 0;
-  return Math.max(0, Math.ceil((30_000 - (Date.now() - last)) / 1000));
+  return Math.max(0, Math.ceil((PING_COOLDOWN_MS - (Date.now() - last)) / 1000));
 }
 
 function initials(name) {
