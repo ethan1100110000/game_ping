@@ -43,6 +43,44 @@ https://your-gameping-url.onrender.com/?token=<long-random-token>
 
 The web app stores the token locally and removes it from the visible URL after opening.
 
+## Cloudflare Workers + D1
+
+Cloudflare is the preferred free path for GamePing because Workers do not have Render's 15-minute free-service sleep behavior, and D1 keeps friend/device/ping data outside the server process.
+
+1. Log in:
+
+```sh
+npx wrangler login
+```
+
+2. Create the D1 database:
+
+```sh
+npm run cf:d1:create
+```
+
+Copy the returned `database_id` into `wrangler.toml`.
+
+3. Apply the schema:
+
+```sh
+npm run cf:d1:migrate
+```
+
+4. Set the private VAPID key as a Cloudflare secret:
+
+```sh
+npx wrangler secret put VAPID_PRIVATE_KEY
+```
+
+5. Deploy:
+
+```sh
+npm run cf:deploy
+```
+
+After deployment, use the printed `workers.dev` URL as the GamePing server URL. The public web app is served from the same Worker and uses the same API routes.
+
 ## Render API
 
 After the code is in a GitHub repo, the service can be created with the Render API:

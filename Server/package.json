@@ -4,7 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check server.mjs && node --check public/app.js && node --check apns.mjs && node --check webPush.mjs && node --check scripts/deploy-render.mjs",
+    "check": "node --check server.mjs && node --check worker.mjs && node --check public/app.js && node --check apns.mjs && node --check webPush.mjs && node --check scripts/deploy-render.mjs",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy",
+    "cf:d1:create": "wrangler d1 create gameping-db",
+    "cf:d1:migrate": "wrangler d1 migrations apply gameping-db --remote",
+    "cf:d1:migrate:local": "wrangler d1 migrations apply gameping-db --local",
     "deploy:render": "node scripts/deploy-render.mjs",
     "start": "node server.mjs",
     "start:lan": "HOST=0.0.0.0 node server.mjs",
@@ -12,5 +17,8 @@
   },
   "dependencies": {
     "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "wrangler": "^4.90.1"
   }
 }

@@ -1,0 +1,17 @@
+name = "gameping"
+main = "worker.mjs"
+compatibility_date = "2026-05-14"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[vars]
+VAPID_PUBLIC_KEY = "BKZW3AuE_RBMVMLL4bDKDVsIUtjlxyRxX7HZ5PwiPjMndx3CkzI727hxEzG1frhE19O32aoRmGbXmvJliAEPZs8"
+VAPID_SUBJECT = "mailto:gameping@example.com"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gameping-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "./migrations"
